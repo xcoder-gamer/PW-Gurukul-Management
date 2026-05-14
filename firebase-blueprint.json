@@ -1,0 +1,174 @@
+{
+  "entities": {
+    "Program": {
+      "title": "Academic Program",
+      "description": "Defines academic levels like JEE, NEET, etc.",
+      "type": "object",
+      "properties": {
+        "programName": { "type": "string", "description": "8th, JEE/NEET 2024, etc." },
+        "classLevel": { "type": "string", "description": "8, 9, 10, 11, 12, Dropper" },
+        "examType": { "type": "string", "description": "JEE, NEET, FOUNDATION" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["programName", "classLevel", "examType"]
+    },
+    "Center": {
+      "title": "Coaching Center",
+      "description": "Physical location of the center",
+      "type": "object",
+      "properties": {
+        "centerName": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["centerName"]
+    },
+    "Batch": {
+      "title": "Batch",
+      "description": "A group of students in a program at a center",
+      "type": "object",
+      "properties": {
+        "batchName": { "type": "string" },
+        "programId": { "type": "string" },
+        "centerId": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["batchName", "programId", "centerId"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Student record",
+      "type": "object",
+      "properties": {
+        "regNo": { "type": "string" },
+        "name": { "type": "string" },
+        "programId": { "type": "string" },
+        "batchId": { "type": "string" },
+        "centerId": { "type": "string" },
+        "gender": { "type": "string" },
+        "batchCode": { "type": "string" },
+        "type": { "type": "string" },
+        "boardGrade": { "type": "string" },
+        "targetYear": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      },
+      "required": ["regNo", "name", "batchId"]
+    },
+    "QBG": {
+      "title": "Question Bank Master",
+      "description": "Master data for questions and IDs",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "chapter": { "type": "string" },
+        "chapterId": { "type": "string" },
+        "topic": { "type": "string" },
+        "topicId": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "difficultyId": { "type": "string" }
+      },
+      "required": ["subject", "chapter"]
+    },
+    "TestPattern": {
+      "title": "Test Pattern",
+      "description": "Defines the structure and default marking for different test types",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "totalQuestions": { "type": "number" },
+        "markingScheme": {
+          "type": "object",
+          "properties": {
+            "positive": { "type": "number" },
+            "negative": { "type": "number" },
+            "partial": { "type": "boolean" }
+          }
+        },
+        "advancedConfig": {
+          "type": "object",
+          "description": "Yearly paper configuration for JEE Advanced"
+        }
+      },
+      "required": ["name"]
+    },
+    "Test": {
+      "title": "Academic Test",
+      "description": "Configuration for a test including answer keys and batch mappings",
+      "type": "object",
+      "properties": {
+        "testName": { "type": "string" },
+        "testDate": { "type": "string", "format": "date" },
+        "pattern": { "type": "string", "enum": ["JEE_MAIN", "JEE_ADVANCED", "NEET"] },
+        "advancedPapers": { "type": "array", "items": { "type": "string" } },
+        "batchIds": { "type": "array", "items": { "type": "string" } },
+        "totalQuestions": { "type": "number" },
+        "answerKey": { "type": "object" },
+        "paperKeys": { "type": "object", "description": "Separate answer keys for different papers in Advanced pattern" },
+        "paperMappings": { "type": "object", "description": "Separate mappings for different papers" },
+        "answerKeyVersion": { "type": "number" },
+        "status": { "type": "string", "enum": ["ACTIVE", "DRAFT"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["testName", "batchIds", "totalQuestions"]
+    },
+    "Result": {
+      "title": "Test Result",
+      "description": "Computed scores and analytics for a student's test attempt",
+      "type": "object",
+      "properties": {
+        "testId": { "type": "string" },
+        "regNo": { "type": "string" },
+        "studentName": { "type": "string" },
+        "score": { "type": "number" },
+        "correct": { "type": "number" },
+        "wrong": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "evaluatedAt": { "type": "string", "format": "date-time" },
+        "rank": { "type": "number" }
+      },
+      "required": ["testId", "regNo", "score"]
+    },
+    "QBGLibrary": {
+      "title": "Hierarchical Question Bank Library",
+      "description": "Optimized hierarchical storage for subjects, chapters, topics, and subtopics",
+      "type": "object",
+      "properties": {
+        "subject": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "data": { "type": "object", "description": "Nested map of mapping data" }
+      },
+      "required": ["subject", "subjectId"]
+    },
+    "Log": {
+      "title": "Audit Log",
+      "description": "System and user action logs",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "category": { "type": "string" },
+        "resourceId": { "type": "string" },
+        "resourceName": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "userEmail", "action", "category", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/programs/{programId}": { "schema": "Program", "description": "Academic programs" },
+    "/centers/{centerId}": { "schema": "Center", "description": "List of centers" },
+    "/batches/{batchId}": { "schema": "Batch", "description": "Batches linked to centers and programs" },
+    "/students/{studentId}": { "schema": "Student", "description": "Student enrollment data" },
+    "/qbgMaster/{qId}": { "schema": "QBG", "description": "Master question bank" },
+    "/qbgLibrary/{sId}": { "schema": "QBGLibrary", "description": "Hierarchical question bank library" },
+    "/testPatterns/{patternId}": { "schema": "TestPattern", "description": "Marking schemes and patterns" },
+    "/tests/{testId}": { "schema": "Test", "description": "Created tests and keys" },
+    "/result_updated/{resultId}": { "schema": "Result", "description": "Computed ranking and scores" },
+    "/logs/{logId}": { "schema": "Log", "description": "Audit and system logs" }
+  }
+}

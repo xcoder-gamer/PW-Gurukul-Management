@@ -1,0 +1,1428 @@
+import React, { useState, useEffect } from 'react';
+import { Card, Button, Input, Select, Badge, Loader } from '../components/UI';
+import { 
+  Search, 
+  Filter, 
+  Plus, 
+  Upload, 
+  X, 
+  Trash2,
+  Archive,
+  MoreVertical, 
+  ChevronRight, 
+  User, 
+  GraduationCap, 
+  Calendar, 
+  MapPin, 
+  Hash,
+  Download,
+  Share2,
+  Mail,
+  Smartphone,
+  FileText,
+  Edit2
+} from 'lucide-react';
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { collection, addDoc, getDocs, query, where, Timestamp, orderBy, limit, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { motion, AnimatePresence } from 'framer-motion';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import { cn } from '../lib/utils';
+import { toast } from 'sonner';
+import { addLog, LogAction, LogCategory } from '../lib/logs';
+import { useAuth } from '../context/AuthContext';
+
+export default function Students() {
+  const { user, role } = useAuth();
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const [students, setStudents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  
+  useEffect(() => {
+    console.log('Current selected IDs:', selectedIds);
+  }, [selectedIds]);
+  
+  const [search, setSearch] = useState('');
+  const [programs, setPrograms] = useState<any[]>([]);
+  const [centers, setCenters] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);
+  
+  const [filters, setFilters] = useState({
+    program: '',
+    center: '',
+    batch: '',
+    gender: '',
+    type: '',
+    status: '',
+    targetYear: '',
+    rankTarget: '',
+    showInactive: false
+  });
+
+  const [newStudent, setNewStudent] = useState({
+    name: '',
+    regNo: '',
+    programId: '',
+    centerId: '',
+    batchId: '',
+    batchCode: '',
+    phone: '',
+    email: '',
+    status: 'active',
+    gender: '',
+    type: '',
+    rankTarget: '',
+    targetYear: ''
+  });
+
+  useEffect(() => {
+    fetchStudents();
+    fetchMasters();
+  }, []);
+
+  const fetchMasters = async () => {
+    const [progSnap, centSnap, batchSnap] = await Promise.all([
+      getDocs(query(collection(db, 'programs'), where('isActive', '==', true))),
+      getDocs(query(collection(db, 'centers'), where('isActive', '==', true))),
+      getDocs(query(collection(db, 'batches'), where('isActive', '==', true)))
+    ]);
+    setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    setCenters(centSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    setBatches(batchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('action') === 'add') {
+      setIsAddModalOpen(true);
+    }
+  }, []);
+
+  const fetchStudents = async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, 'students'), orderBy('createdAt', 'desc'), limit(100));
+      const snap = await getDocs(q);
+      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'students');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const docRef = await addDoc(collection(db, 'students'), {
+        ...newStudent,
+        createdAt: Timestamp.now()
+      });
+
+      await addLog({
+        userId: user?.uid || 'system',
+        userEmail: user?.email || 'unknown',
+        action: LogAction.CREATE,
+        category: LogCategory.STUDENT,
+        resourceId: docRef.id,
+        resourceName: newStudent.name,
+        details: `Student ${newStudent.name} (${newStudent.regNo}) added manually`,
+        newData: { name: newStudent.name, regNo: newStudent.regNo }
+      });
+
+      setIsAddModalOpen(false);
+      setNewStudent({ 
+        name: '', 
+        regNo: '', 
+        programId: '', 
+        centerId: '', 
+        batchId: '', 
+        batchCode: '',
+        phone: '', 
+        email: '', 
+        status: 'active',
+        gender: '',
+        type: '',
+        rankTarget: '',
+        targetYear: ''
+      });
+      fetchStudents();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'students');
+    }
+  };
+
+  const handleExport = () => {
+    if (filteredStudents.length === 0) {
+      toast.error('No data to export');
+      return;
+    }
+
+    const exportData = filteredStudents.map(s => ({
+      'Reg No': s.regNo,
+      'Name': s.name,
+      'Gender': s.gender,
+      'Phone': s.phone,
+      'Email': s.email,
+      'Program': programs.find(p => p.id === s.programId)?.programName || '',
+      'Center': centers.find(c => c.id === s.centerId)?.centerName || '',
+      'Batch': batches.find(b => b.id === s.batchId)?.batchName || '',
+      'Batch Code': s.batchCode || '',
+      'Type': s.type || '',
+      'Rank Target': s.rankTarget || '',
+      'Target Year': s.targetYear || '',
+      'Status': s.status || 'active'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Students");
+    XLSX.writeFile(wb, `Students_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast.success(`Exported ${exportData.length} records`);
+  };
+
+  const handleBulkUpload = async (results: any) => {
+    const data = results.data;
+    if (!data || data.length === 0) {
+      toast.error('No data found in file');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Fetch existing regNo mapping for upsert logic
+      const existingSnap = await getDocs(collection(db, 'students'));
+      const regNoToId = new Map();
+      existingSnap.docs.forEach(doc => {
+        const d = doc.data();
+        if (d.regNo) regNoToId.set(String(d.regNo).toUpperCase(), doc.id);
+      });
+
+      const batchSize = 500;
+      let appends = 0;
+      let updates = 0;
+      
+      // Process in chunks of 500
+      for (let i = 0; i < data.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = data.slice(i, i + batchSize);
+        let batchCount = 0;
+
+        for (const row of chunk) {
+          const normalizedRow: any = {};
+          Object.entries(row).forEach(([key, val]) => {
+            const normalizedKey = key.toLowerCase().replace(/\s+/g, '').replace(/[._]/g, '');
+            normalizedRow[normalizedKey] = val;
+          });
+
+          const name = normalizedRow.name || normalizedRow.studentname || normalizedRow.fullname || '';
+          const regNo = String(normalizedRow.regno || normalizedRow.registrationno || normalizedRow.rollno || '').trim().toUpperCase();
+
+          if (name && regNo) {
+            const existingId = regNoToId.get(regNo);
+            const studentDoc = existingId ? doc(db, 'students', existingId) : doc(collection(db, 'students'));
+            
+            // Resolve program/center/batch names to IDs
+            let progId = normalizedRow.programid || '';
+            if (!progId && normalizedRow.program) {
+               const found = programs.find(p => p.programName?.toLowerCase() === String(normalizedRow.program).toLowerCase());
+               if (found) progId = found.id;
+               else progId = String(normalizedRow.program).trim(); // Keep raw if not found
+            }
+
+            let centId = normalizedRow.centerid || '';
+            if (!centId && (normalizedRow.center || normalizedRow.centername)) {
+               const centerSearch = normalizedRow.center || normalizedRow.centername;
+               const found = centers.find(c => c.centerName?.toLowerCase() === String(centerSearch).toLowerCase());
+               if (found) centId = found.id;
+               else centId = String(centerSearch).trim(); // Keep raw if not found
+            }
+
+            let bId = normalizedRow.batchid || '';
+            if (!bId && (normalizedRow.batch || normalizedRow.batchname)) {
+               const batchSearch = normalizedRow.batch || normalizedRow.batchname;
+               const found = batches.find(b => b.batchName?.toLowerCase() === String(batchSearch).toLowerCase());
+               if (found) bId = found.id;
+               else bId = String(batchSearch).trim(); // Keep raw if not found
+            }
+
+            const sanitizedStudent: any = {
+              name: String(name || '').trim(),
+              regNo: regNo,
+              programId: String(progId || ''),
+              centerId: String(centId || ''),
+              batchId: String(bId || ''),
+              phone: String(normalizedRow.phone || normalizedRow.phoneno || normalizedRow.contact || '').trim(),
+              email: String(normalizedRow.email || normalizedRow.mailid || normalizedRow.emailaddress || '').trim(),
+              gender: String(normalizedRow.gender || '').trim(),
+              batchCode: String(normalizedRow.batchcode || '').trim(),
+              type: String(normalizedRow.type || '').trim(),
+              rankTarget: String(normalizedRow.ranktarget || normalizedRow.rank || '').trim(),
+              targetYear: String(normalizedRow.targetyear || '').trim(),
+              updatedAt: Timestamp.now()
+            };
+
+            if (existingId) {
+              batch.update(studentDoc, sanitizedStudent);
+              updates++;
+            } else {
+              sanitizedStudent.status = 'active';
+              sanitizedStudent.createdAt = Timestamp.now();
+              batch.set(studentDoc, sanitizedStudent);
+              appends++;
+            }
+            batchCount++;
+          }
+        }
+
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+      }
+
+      if (appends > 0 || updates > 0) {
+        toast.success(`Processed: ${appends} added, ${updates} updated`);
+        
+        await addLog({
+          userId: user?.uid || 'system',
+          userEmail: user?.email || 'unknown',
+          action: LogAction.IMPORT,
+          category: LogCategory.STUDENT,
+          resourceId: 'bulk-upsert',
+          resourceName: 'Bulk Student Upsert',
+          details: `Bulk Import: ${appends} new students added, ${updates} existing students updated.`,
+        });
+
+        setIsUploadModalOpen(false);
+        fetchStudents();
+      } else {
+        toast.error('No valid records found to process.');
+      }
+    } catch (err) {
+      console.error(err);
+      handleFirestoreError(err, OperationType.WRITE, 'students_bulk');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Memoize filtered students for stability
+  const filteredStudents = React.useMemo(() => {
+    return students.filter(s => {
+      const name = s.name || '';
+      const regNo = s.regNo || '';
+      const status = s.status || 'active';
+      
+      const matchesSearch = name.toLowerCase().includes(search.toLowerCase()) || 
+                            regNo.toLowerCase().includes(search.toLowerCase());
+      const matchesProgram = !filters.program || s.programId === filters.program;
+      const matchesCenter = !filters.center || s.centerId === filters.center;
+      const matchesBatch = !filters.batch || s.batchId === filters.batch;
+      const matchesGender = !filters.gender || s.gender === filters.gender;
+      const matchesType = !filters.type || s.type === filters.type;
+      const matchesTargetYear = !filters.targetYear || s.targetYear === filters.targetYear;
+      const matchesRankTarget = !filters.rankTarget || s.rankTarget === filters.rankTarget;
+      const matchesStatus = filters.status ? status === filters.status : (filters.showInactive ? true : status === 'active');
+      
+      return matchesSearch && matchesProgram && matchesCenter && matchesBatch && 
+             matchesGender && matchesType && matchesTargetYear && matchesRankTarget && 
+             matchesStatus;
+    });
+  }, [students, search, filters]);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredStudents.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredStudents.map(s => s.id));
+    }
+  };
+
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  return (
+    <div className="space-y-6 relative">
+      {loading && <Loader fullScreen label="Processing Students..." />}
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div className="space-y-1">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Directory</p>
+          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Students</h1>
+          <p className="text-slate-500 font-medium text-sm">
+            Manage your student records, batches, and enrollment data.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="md" onClick={handleExport} className="border-slate-200">
+             <Download size={18} className="mr-2 text-emerald-600" />
+             Export Data
+          </Button>
+          {isAdmin && (
+            <>
+              <Button variant="outline" size="md" onClick={() => setIsUploadModalOpen(true)} className="border-slate-200">
+                 <Upload size={18} className="mr-2 text-blue-600" />
+                 Bulk Import
+              </Button>
+              <Button variant="primary" size="md" onClick={() => setIsAddModalOpen(true)} className="shadow-lg shadow-blue-100 px-6">
+                 <Plus size={18} className="mr-2" strokeWidth={3} />
+                 Add Student
+              </Button>
+            </>
+          )}
+        </div>
+      </header>
+
+      <div className="flex flex-col md:flex-row gap-6">
+        <div className="flex-1 relative">
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+          <Input 
+            placeholder="Search by name, registration number or email..." 
+            value={search} 
+            onChange={e => setSearch(e.target.value)}
+            className="pl-14 py-8 rounded-2xl text-lg font-bold border-slate-100 focus:border-blue-400 transition-all bg-white shadow-sm"
+          />
+        </div>
+        <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl h-auto px-6 whitespace-nowrap">
+          <Filter size={18} className="mr-2" />
+          Advanced Filters
+        </Button>
+      </div>
+
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-slate-50/50 border-b border-slate-100">
+                <th className="px-8 py-5 text-left w-10">
+                  <input 
+                    type="checkbox" 
+                    className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    checked={filteredStudents.length > 0 && selectedIds.length === filteredStudents.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Details</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Reg No.</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Student Name</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gender</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Batch Code</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Center</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Program</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Type</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Rank Target</th>
+                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Target Year</th>
+                <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isAdmin ? 'Action' : 'View'}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {loading ? (
+                Array(6).fill(0).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td colSpan={11} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
+                  </tr>
+                ))
+              ) : filteredStudents.length === 0 ? (
+                <tr>
+                  <td colSpan={11} className="py-20 text-center space-y-4">
+                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-230">
+                       <User size={40} />
+                    </div>
+                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No students found</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredStudents.map(student => (
+                    <StudentRow 
+                      key={student.id} 
+                      student={student} 
+                      isAdmin={isAdmin}
+                      selected={selectedIds.includes(student.id)}
+                      onSelect={(e: React.MouseEvent) => toggleSelect(student.id, e)}
+                      onClick={setSelectedStudent}
+                      onEditClick={(s: any) => {
+                        setSelectedStudent(s);
+                        setIsEditMode(true);
+                      }}
+                      onDeleteClick={async (s: any) => {
+                        const isInactive = s.status === 'inactive';
+                        const action = isInactive ? 'permanently delete' : 'archive';
+                        const message = isInactive 
+                          ? `Are you sure you want to PERMANENTLY delete ${s.name} from Firebase? This cannot be undone.`
+                          : `Are you sure you want to archive ${s.name}? The record will remain in Firebase but will be hidden from the active list.`;
+
+                        if (confirm(message)) {
+                          setLoading(true);
+                          try {
+                            if (isInactive) {
+                              await deleteDoc(doc(db, 'students', s.id));
+                              toast.success('Student permanently deleted');
+                            } else {
+                              await updateDoc(doc(db, 'students', s.id), { status: 'inactive' });
+                              toast.success('Student archived successfully');
+                            }
+                            fetchStudents();
+                          } catch (err) {
+                            handleFirestoreError(err, OperationType.WRITE, 'students_row_delete');
+                          } finally {
+                            setLoading(false);
+                          }
+                        }
+                      }}
+                      programName={programs.find(p => p.id === student.programId)?.programName || student.programId}
+                      centerName={centers.find(c => c.id === student.centerId)?.centerName || student.centerId}
+                      batchName={batches.find(b => b.id === student.batchId)?.batchName || student.batchId}
+                    />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white rounded-[2rem] px-8 py-4 shadow-2xl flex items-center gap-8 border border-white/10 backdrop-blur-xl"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center font-black text-sm">
+                {selectedIds.length}
+              </div>
+              <p className="text-sm font-black text-slate-200 uppercase tracking-widest">selected</p>
+            </div>
+            
+            <div className="h-8 w-px bg-white/10" />
+            
+            <div className="flex items-center gap-2">
+              <button 
+                type="button"
+                className="flex items-center gap-2 hover:text-blue-400 transition-all active:scale-95 font-black text-[10px] uppercase tracking-widest px-3 py-2 rounded-xl hover:bg-white/5"
+                onClick={() => {
+                  if (confirm(`Export ${selectedIds.length} students to Excel?`)) {
+                    const dataToExport = students.filter(s => selectedIds.includes(s.id));
+                    const ws = XLSX.utils.json_to_sheet(dataToExport);
+                    const wb = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(wb, ws, "Selected Students");
+                    XLSX.writeFile(wb, "Selected_Students.xlsx");
+                  }
+                }}
+              >
+                <Download size={14} />
+                Export
+              </button>
+
+              {isAdmin && (
+                <>
+                  <button 
+                    type="button"
+                    className="flex items-center gap-2 hover:text-amber-400 transition-all active:scale-95 font-black text-[10px] uppercase tracking-widest px-3 py-2 rounded-xl hover:bg-white/5"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Bulk Archive triggered');
+                      if (confirm(`Archive ${selectedIds.length} students? They will be hidden from the active list but remain in the database.`)) {
+                        setLoading(true);
+                        try {
+                          const batchSize = 400;
+                          for (let i = 0; i < selectedIds.length; i += batchSize) {
+                            const batch = writeBatch(db);
+                            const chunk = selectedIds.slice(i, i + batchSize);
+                            chunk.forEach(id => {
+                              batch.update(doc(db, 'students', id), { status: 'inactive' });
+                            });
+                            await batch.commit();
+                          }
+                          
+                          await addLog({
+                            userId: user?.uid || 'system',
+                            userEmail: user?.email || 'unknown',
+                            action: LogAction.UPDATE,
+                            category: LogCategory.STUDENT,
+                            resourceId: 'bulk',
+                            resourceName: 'Bulk Archive',
+                            details: `Archived ${selectedIds.length} students via bulk action`,
+                          });
+
+                          toast.success(`Archived ${selectedIds.length} students`);
+                          setSelectedIds([]);
+                          fetchStudents();
+                        } catch (err) {
+                          console.error('Bulk archive error:', err);
+                          handleFirestoreError(err, OperationType.WRITE, 'students_bulk_archive');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                  >
+                    <Archive size={14} />
+                    Archive
+                  </button>
+
+                  <button 
+                    type="button"
+                    className="flex items-center gap-2 hover:text-red-400 transition-all active:scale-95 font-black text-[10px] uppercase tracking-widest px-3 py-2 rounded-xl hover:bg-white/5"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      console.log('Bulk Delete process started');
+                      if (confirm(`PERMANENTLY DELETE ${selectedIds.length} students from Firebase? This cannot be undone.`)) {
+                        console.log(`Confirmed deletion of ${selectedIds.length} IDs`);
+                        const toastId = toast.loading(`Deleting ${selectedIds.length} students...`);
+                        setLoading(true);
+                        try {
+                          const batchSize = 400;
+                          let successfullyDeleted = 0;
+                          for (let i = 0; i < selectedIds.length; i += batchSize) {
+                            const batch = writeBatch(db);
+                            const chunk = selectedIds.slice(i, i + batchSize);
+                            chunk.forEach(id => {
+                              batch.delete(doc(db, 'students', id));
+                            });
+                            await batch.commit();
+                            successfullyDeleted += chunk.length;
+                            console.log(`Deleted ${successfullyDeleted}/${selectedIds.length}`);
+                            if (selectedIds.length > batchSize) {
+                               toast.loading(`Deleting... ${successfullyDeleted}/${selectedIds.length}`, { id: toastId });
+                            }
+                          }
+                          
+                          await addLog({
+                            userId: user?.uid || 'system',
+                            userEmail: user?.email || 'unknown',
+                            action: LogAction.DELETE,
+                            category: LogCategory.STUDENT,
+                            resourceId: 'bulk',
+                            resourceName: 'Bulk Delete',
+                            details: `Permanently deleted ${selectedIds.length} students via bulk action`,
+                          });
+
+                          toast.success(`Successfully deleted ${selectedIds.length} students from Firebase`, { id: toastId });
+                          setSelectedIds([]);
+                          await fetchStudents();
+                          console.log('Bulk delete finished successfully');
+                        } catch (err) {
+                          console.error('CRITICAL: Bulk delete failed', err);
+                          toast.error('Bulk deletion failed', { id: toastId });
+                          handleFirestoreError(err, OperationType.WRITE, 'students_bulk_delete');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    Delete
+                  </button>
+                </>
+              )}
+            </div>
+            
+            <button 
+              onClick={() => setSelectedIds([])}
+              className="p-2 hover:bg-white/10 rounded-full transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedStudent && (
+          <StudentProfile 
+            student={selectedStudent} 
+            onClose={() => { setSelectedStudent(null); setIsEditMode(false); }} 
+            isEditMode={isEditMode}
+            onEdit={() => setIsEditMode(true)}
+            onDelete={async () => {
+              const isInactive = selectedStudent.status === 'inactive';
+              const message = isInactive 
+                ? 'Permanently delete this student from Firebase? This cannot be undone.'
+                : 'Archive this student? The document will remain in Firebase but hidden from active list.';
+              
+              if (confirm(message)) {
+                try {
+                  if (isInactive) {
+                    await deleteDoc(doc(db, 'students', selectedStudent.id));
+                    
+                    await addLog({
+                      userId: user?.uid || 'system',
+                      userEmail: user?.email || 'unknown',
+                      action: LogAction.DELETE,
+                      category: LogCategory.STUDENT,
+                      resourceId: selectedStudent.id,
+                      resourceName: selectedStudent.name,
+                      details: `Student ${selectedStudent.name} permanently deleted from database`,
+                      previousData: selectedStudent
+                    });
+
+                    toast.success('Student permanently deleted');
+                  } else {
+                    await updateDoc(doc(db, 'students', selectedStudent.id), { status: 'inactive' });
+                    
+                    await addLog({
+                      userId: user?.uid || 'system',
+                      userEmail: user?.email || 'unknown',
+                      action: LogAction.UPDATE,
+                      category: LogCategory.STUDENT,
+                      resourceId: selectedStudent.id,
+                      resourceName: selectedStudent.name,
+                      details: `Student ${selectedStudent.name} archived (marked as inactive)`,
+                      previousData: selectedStudent,
+                      newData: { status: 'inactive' }
+                    });
+
+                    toast.success('Student archived successfully');
+                  }
+                  setSelectedStudent(null);
+                  fetchStudents();
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.WRITE, 'students_profile_delete');
+                }
+              }
+            }}
+            onSave={async (updatedData) => {
+              try {
+                const studentRef = doc(db, 'students', selectedStudent.id);
+                await updateDoc(studentRef, updatedData);
+                
+                await addLog({
+                  userId: user?.uid || 'system',
+                  userEmail: user?.email || 'unknown',
+                  action: LogAction.UPDATE,
+                  category: LogCategory.STUDENT,
+                  resourceId: selectedStudent.id,
+                  resourceName: selectedStudent.name,
+                  details: `Student ${selectedStudent.name} (${selectedStudent.regNo}) details updated`,
+                  previousData: selectedStudent,
+                  newData: updatedData
+                });
+
+                setSelectedStudent({ ...selectedStudent, ...updatedData });
+                setIsEditMode(false);
+                fetchStudents();
+                toast.success('Student updated successfully');
+              } catch (err) {
+                handleFirestoreError(err, OperationType.WRITE, 'students_update');
+              }
+            }}
+            programs={programs}
+            centers={centers}
+            batches={batches}
+          />
+        )}
+      </AnimatePresence>
+
+      <BottomSheet isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)}>
+        <div className="space-y-6 max-h-[80vh] overflow-y-auto px-1 no-scrollbar pb-10">
+          <div className="flex items-center justify-between sticky top-0 bg-white z-10 pb-4">
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Advanced Filters</h2>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setFilters({
+                program: '', center: '', batch: '', gender: '', type: '', 
+                status: '', targetYear: '', rankTarget: '', showInactive: false
+              })}
+              className="text-rose-500 font-bold"
+            >Reset</Button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 font-black">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Gender</label>
+              <Select value={filters.gender} onChange={e => setFilters({...filters, gender: e.target.value})}>
+                <option value="">All Genders</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Status</label>
+              <Select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})}>
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Type</label>
+              <Select value={filters.type} onChange={e => setFilters({...filters, type: e.target.value})}>
+                <option value="">All Types</option>
+                <option value="Day Boarding">Day Boarding</option>
+                <option value="e-Gurukul">e-Gurukul</option>
+                <option value="Hosteller">Hosteller</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Target Year</label>
+              <Select value={filters.targetYear} onChange={e => setFilters({...filters, targetYear: e.target.value})}>
+                <option value="">All Years</option>
+                <option value="2026">2026</option>
+                <option value="2027">2027</option>
+                <option value="2028">2028</option>
+                <option value="2029">2029</option>
+                <option value="2030">2030</option>
+                <option value="2031">2031</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Rank Target</label>
+              <Select value={filters.rankTarget} onChange={e => setFilters({...filters, rankTarget: e.target.value})}>
+                <option value="">All Ranks</option>
+                <option value="Under 100">Under 100</option>
+                <option value="Under 200">Under 200</option>
+                <option value="Under 500">Under 500</option>
+                <option value="Under 1000">Under 1000</option>
+                <option value="Under 2000">Under 2000</option>
+                <option value="Above 5000">Above 5000</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Batch Code</label>
+              <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
+                <option value="">All Batch Codes</option>
+                {batches.map(b => (
+                  (!filters.program || b.programId === filters.program) && 
+                  (!filters.center || b.centerId === filters.center) &&
+                  <option key={b.id} value={b.id}>{b.batchName}</option>
+                ))}
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Program</label>
+              <Select value={filters.program} onChange={e => setFilters({...filters, program: e.target.value})}>
+                <option value="">All Programs</option>
+                {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Center</label>
+              <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value})}>
+                <option value="">All Centers</option>
+                {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+              </Select>
+            </div>
+          </div>
+          <Button variant="primary" size="lg" className="w-full shadow-xl shadow-blue-100" onClick={() => setIsFilterOpen(false)}>Apply Filters</Button>
+        </div>
+      </BottomSheet>
+
+      <BottomSheet isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)}>
+        <form onSubmit={handleAddStudent} className="space-y-6 max-h-[70vh] overflow-y-auto px-1">
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Add Student</h2>
+          <div className="space-y-4 pb-4">
+            <div className="grid grid-cols-2 gap-4">
+              <Input placeholder="Registration No." value={newStudent.regNo} onChange={e => setNewStudent({...newStudent, regNo: e.target.value})} required />
+              <Select value={newStudent.batchCode} onChange={e => {
+                const code = e.target.value;
+                const relatedBatch = batches.find(b => b.batchCode === code || b.batchName === code);
+                setNewStudent({
+                  ...newStudent, 
+                  batchCode: code,
+                  batchId: relatedBatch ? relatedBatch.id : newStudent.batchId,
+                  programId: relatedBatch ? relatedBatch.programId : newStudent.programId,
+                  centerId: relatedBatch ? relatedBatch.centerId : newStudent.centerId
+                });
+              }}>
+                <option value="">Batch Code</option>
+                {Array.from(new Set(batches.filter(b => b.isActive).map(b => b.batchCode || b.batchName))).sort().map(code => (
+                  <option key={code} value={code}>{code}</option>
+                ))}
+              </Select>
+            </div>
+            <Input placeholder="Full Name" value={newStudent.name} onChange={e => setNewStudent({...newStudent, name: e.target.value})} required />
+            <div className="grid grid-cols-2 gap-4">
+              <Select value={newStudent.batchId} onChange={e => {
+                const bId = e.target.value;
+                const found = batches.find(b => b.id === bId);
+                setNewStudent({
+                  ...newStudent, 
+                  batchId: bId,
+                  batchCode: found?.batchCode || found?.batchName || newStudent.batchCode,
+                  programId: found?.programId || newStudent.programId,
+                  centerId: found?.centerId || newStudent.centerId
+                });
+              }} required>
+                <option value="">Enroll in Batch</option>
+                {batches.map(b => (
+                  (!newStudent.programId || b.programId === newStudent.programId) && 
+                  (!newStudent.centerId || b.centerId === newStudent.centerId) &&
+                  <option key={b.id} value={b.id}>{b.batchName}</option>
+                ))}
+              </Select>
+              <Select value={newStudent.gender} onChange={e => setNewStudent({...newStudent, gender: e.target.value})}>
+                <option value="">Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Select value={newStudent.type} onChange={e => setNewStudent({...newStudent, type: e.target.value})}>
+                <option value="">Type</option>
+                <option value="Day Boarding">Day Boarding</option>
+                <option value="e-Gurukul">e-Gurukul</option>
+                <option value="Hosteller">Hosteller</option>
+              </Select>
+              <Select value={newStudent.targetYear} onChange={e => setNewStudent({...newStudent, targetYear: e.target.value})}>
+                <option value="">Target Year</option>
+                <option value="2026">2026</option>
+                <option value="2027">2027</option>
+                <option value="2028">2028</option>
+                <option value="2029">2029</option>
+                <option value="2030">2030</option>
+                <option value="2031">2031</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Select value={newStudent.rankTarget} onChange={e => setNewStudent({...newStudent, rankTarget: e.target.value})}>
+                <option value="">Rank Target</option>
+                <option value="Under 100">Under 100</option>
+                <option value="Under 200">Under 200</option>
+                <option value="Under 500">Under 500</option>
+                <option value="Under 1000">Under 1000</option>
+                <option value="Under 2000">Under 2000</option>
+                <option value="Above 5000">Above 5000</option>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Select value={newStudent.programId} onChange={e => setNewStudent({...newStudent, programId: e.target.value})} required>
+                <option value="">Program</option>
+                {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+              </Select>
+              <Select value={newStudent.centerId} onChange={e => setNewStudent({...newStudent, centerId: e.target.value})} required>
+                 <option value="">Center</option>
+                 {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <Input placeholder="Phone Number" value={newStudent.phone} onChange={e => setNewStudent({...newStudent, phone: e.target.value})} />
+              <Input placeholder="Email Address" type="email" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} />
+            </div>
+          </div>
+          <Button type="submit" variant="primary" size="lg" className="w-full shadow-xl shadow-blue-100">Add Student Record</Button>
+        </form>
+      </BottomSheet>
+
+      <BottomSheet isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)}>
+        <div className="space-y-6 text-center">
+          <div className="w-20 h-20 bg-blue-50 rounded-[2rem] flex items-center justify-center text-blue-600 mx-auto">
+             <Upload size={32} strokeWidth={3} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bulk Upload</h2>
+            <p className="text-sm text-slate-400 font-bold mt-2">Upload student CSV data instantly</p>
+          </div>
+          <div className="space-y-4">
+            <div className="p-6 bg-[#F8FAFC] border-2 border-dashed border-slate-200 rounded-[2.5rem] relative group cursor-pointer hover:border-blue-200 transition-colors">
+              <input 
+                type="file" 
+                accept=".csv,.xlsx,.xls" 
+                className="absolute inset-0 opacity-0 cursor-pointer z-10" 
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    if (file.name.endsWith('.csv')) {
+                      Papa.parse(file, {
+                        header: true,
+                        complete: handleBulkUpload
+                      });
+                    } else {
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const data = new Uint8Array(event.target?.result as ArrayBuffer);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                        handleBulkUpload({ data: jsonData } as any);
+                      };
+                      reader.readAsArrayBuffer(file);
+                    }
+                  }
+                }}
+              />
+              <div className="space-y-2">
+                <span className="block font-black text-slate-900">Click to select CSV/Excel</span>
+                <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest">Required: regNo, name, phone, email, gender, batchCode, type, rankTarget, targetYear</span>
+              </div>
+            </div>
+
+            <Button 
+              variant="secondary" 
+              size="md" 
+              onClick={() => {
+                const ws = XLSX.utils.json_to_sheet([
+                  { 
+                    regNo: 'PW24001', 
+                    name: 'Vishal Kumar', 
+                    gender: 'Male',
+                    program: 'JEE Main',
+                    center: 'Kota Main',
+                    batch: 'Evening Batch',
+                    batchCode: 'JB-24-A',
+                    type: 'Hosteller',
+                    targetYear: '2025',
+                    rankTarget: 'Under 500',
+                    phone: '9876543210', 
+                    email: 'vishal@example.com' 
+                  }
+                ]);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Students");
+                XLSX.writeFile(wb, "Student_Upload_Template.xlsx");
+              }}
+              className="w-full bg-slate-50 border-slate-100"
+            >
+              <Download className="mr-2" size={18} />
+              Download Excel Template
+            </Button>
+          </div>
+          <Button variant="secondary" size="lg" className="w-full" onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
+        </div>
+      </BottomSheet>
+    </div>
+  );
+}
+
+function StudentRow({ student, selected, onSelect, onClick, onEditClick, onDeleteClick, programName, centerName, batchName, isAdmin }: any) {
+  return (
+    <tr 
+      className={cn(
+        "group transition-colors cursor-pointer text-[12px]",
+        selected ? "bg-blue-50/50" : "hover:bg-slate-50/50"
+      )}
+      onClick={() => onClick(student)}
+    >
+      <td className="px-8 py-4 w-10 text-center" onClick={e => e.stopPropagation()}>
+        <input 
+          type="checkbox" 
+          checked={selected}
+          onChange={onSelect as any}
+          className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer transition-transform active:scale-95"
+        />
+      </td>
+      <td className="px-4 py-4 whitespace-nowrap">
+        <div className="flex items-center space-x-3">
+          <div className="w-9 h-9 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform flex-shrink-0">
+             <User size={14} />
+          </div>
+          <Badge variant={student.status === 'active' ? "green" : "slate"} className="px-2 py-0.5 text-[9px] uppercase">
+            {student.status || 'Active'}
+          </Badge>
+        </div>
+      </td>
+      <td className="px-4 py-4">
+        <Badge variant="blue" className="text-[10px] px-2 py-0.5 font-bold">{student.regNo}</Badge>
+      </td>
+      <td className="px-4 py-4 font-black text-slate-800">{student.name}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{student.gender || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{student.batchCode || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{centerName || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{programName || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{student.type || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{student.rankTarget || '—'}</td>
+      <td className="px-4 py-4 text-slate-500 font-bold">{student.targetYear || '—'}</td>
+      <td className="px-8 py-4 text-right">
+        <div className="flex items-center justify-end space-x-2">
+          {isAdmin && (
+            <>
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                className="w-10 h-10 p-0 bg-red-50 border border-red-100 rounded-2xl hover:bg-white hover:shadow-lg transition-all"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  onDeleteClick(student);
+                }}
+              >
+                 <Trash2 size={16} className="text-red-600" />
+              </Button>
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                className="w-10 h-10 p-0 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-white hover:shadow-lg transition-all"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  onEditClick(student);
+                }}
+              >
+                 <Edit2 size={16} className="text-blue-600" />
+              </Button>
+            </>
+          )}
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            className="w-10 h-10 p-0 bg-white border border-slate-100 rounded-2xl hover:shadow-lg transition-all"
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              onClick(student);
+            }}
+          >
+             <ChevronRight size={18} strokeWidth={3} className="text-slate-400 group-hover:text-blue-600" />
+          </Button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function StudentProfile({ 
+  student, 
+  onClose, 
+  isEditMode, 
+  onEdit, 
+  onDelete,
+  onSave,
+  programs,
+  centers,
+  batches
+}: { 
+  student: any, 
+  onClose: () => void, 
+  isEditMode: boolean, 
+  onEdit: () => void, 
+  onDelete: () => Promise<void>,
+  onSave: (data: any) => Promise<void>,
+  programs: any[],
+  centers: any[],
+  batches: any[]
+}) {
+  const { role } = useAuth();
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const [formData, setFormData] = useState({
+    name: student.name || '',
+    regNo: student.regNo || '',
+    programId: student.programId || '',
+    centerId: student.centerId || '',
+    batchId: student.batchId || '',
+    batchCode: student.batchCode || '',
+    phone: student.phone || '',
+    email: student.email || '',
+    status: student.status || 'active',
+    gender: student.gender || '',
+    type: student.type || '',
+    rankTarget: student.rankTarget || '',
+    targetYear: student.targetYear || ''
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    setFormData({
+      name: student.name || '',
+      regNo: student.regNo || '',
+      programId: student.programId || '',
+      centerId: student.centerId || '',
+      batchId: student.batchId || '',
+      batchCode: student.batchCode || '',
+      phone: student.phone || '',
+      email: student.email || '',
+      status: student.status || 'active',
+      gender: student.gender || '',
+    type: student.type || '',
+    rankTarget: student.rankTarget || '',
+      targetYear: student.targetYear || ''
+    });
+  }, [student]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    await onSave(formData);
+    setIsSaving(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        className="relative w-full max-w-lg bg-white rounded-t-[3rem] sm:rounded-[3rem] shadow-2xl overflow-hidden min-h-[85vh]"
+      >
+        <div className="relative h-40 bg-gradient-to-br from-blue-600 to-indigo-700">
+           <button onClick={onClose} className="absolute top-6 right-6 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white backdrop-blur-md transition-colors">
+             <X size={24} />
+           </button>
+           <div className="absolute -bottom-16 left-8 flex items-end space-x-6">
+              <div className="w-32 h-32 rounded-[2.5rem] bg-white p-2 shadow-2xl">
+                 <div className="w-full h-full bg-blue-50 rounded-[2rem] flex items-center justify-center text-blue-600">
+                    <User size={64} strokeWidth={1.5} />
+                 </div>
+              </div>
+           </div>
+        </div>
+
+        <div className="pt-20 px-8 pb-32 space-y-8 overflow-y-auto max-h-[calc(85vh-40px)] no-scrollbar">
+           {isEditMode && isAdmin ? (
+             <div className="space-y-6">
+                <div className="space-y-4">
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Reg No.</label>
+                         <Input value={formData.regNo} onChange={e => setFormData({...formData, regNo: e.target.value})} />
+                      </div>
+                       <div className="space-y-1">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Batch Code</label>
+                          <Select value={formData.batchCode} onChange={e => {
+                            const code = e.target.value;
+                            const relatedBatch = batches.find(b => b.batchCode === code || b.batchName === code);
+                            setFormData({
+                              ...formData, 
+                              batchCode: code,
+                              batchId: relatedBatch ? relatedBatch.id : formData.batchId,
+                              programId: relatedBatch ? relatedBatch.programId : formData.programId,
+                              centerId: relatedBatch ? relatedBatch.centerId : formData.centerId
+                            });
+                          }}>
+                            <option value="">Select Code</option>
+                            {Array.from(new Set(batches.filter(b => b.isActive).map(b => b.batchCode || b.batchName))).sort().map(code => (
+                              <option key={code} value={code}>{code}</option>
+                            ))}
+                          </Select>
+                       </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                       <div className="space-y-1 col-span-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Academic Batch</label>
+                          <Select value={formData.batchId} onChange={e => {
+                             const bId = e.target.value;
+                             const found = batches.find(b => b.id === bId);
+                             setFormData({
+                               ...formData, 
+                               batchId: bId,
+                               batchCode: found?.batchCode || found?.batchName || formData.batchCode,
+                               programId: found?.programId || formData.programId,
+                               centerId: found?.centerId || formData.centerId
+                             });
+                           }}>
+                             <option value="">Select</option>
+                             {batches.map(b => (
+                               (!formData.programId || b.programId === formData.programId) && 
+                               (!formData.centerId || b.centerId === formData.centerId) &&
+                               <option key={b.id} value={b.id}>{b.batchName}</option>
+                             ))}
+                          </Select>
+                       </div>
+                   </div>
+                   <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
+                      <Input value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                   </div>
+                   <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Gender</label>
+                         <Select value={formData.gender} onChange={e => setFormData({...formData, gender: e.target.value})}>
+                            <option value="">Select</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Other">Other</option>
+                         </Select>
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Type</label>
+                         <Select value={formData.type} onChange={e => setFormData({...formData, type: e.target.value})}>
+                            <option value="">Select</option>
+                            <option value="Day Boarding">Day Boarding</option>
+                            <option value="e-Gurukul">e-Gurukul</option>
+                            <option value="Hosteller">Hosteller</option>
+                         </Select>
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Year</label>
+                         <Select value={formData.targetYear} onChange={e => setFormData({...formData, targetYear: e.target.value})}>
+                             <option value="">Select</option>
+                             <option value="2026">2026</option>
+                             <option value="2027">2027</option>
+                             <option value="2028">2028</option>
+                             <option value="2029">2029</option>
+                             <option value="2030">2030</option>
+                             <option value="2031">2031</option>
+                          </Select>
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-1 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Rank Target</label>
+                        <Select value={formData.rankTarget} onChange={e => setFormData({...formData, rankTarget: e.target.value})}>
+                          <option value="">Select Rank</option>
+                          <option value="Under 100">Under 100</option>
+                          <option value="Under 200">Under 200</option>
+                          <option value="Under 500">Under 500</option>
+                          <option value="Under 1000">Under 1000</option>
+                          <option value="Under 2000">Under 2000</option>
+                          <option value="Above 5000">Above 5000</option>
+                        </Select>
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Program</label>
+                         <Select value={formData.programId} onChange={e => setFormData({...formData, programId: e.target.value})}>
+                            <option value="">Select</option>
+                            {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                         </Select>
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
+                         <Select value={formData.centerId} onChange={e => setFormData({...formData, centerId: e.target.value})}>
+                            <option value="">Select</option>
+                            {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                         </Select>
+                      </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phone</label>
+                         <Input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Email</label>
+                         <Input value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} />
+                      </div>
+                   </div>
+                </div>
+                <div className="flex gap-4">
+                   <Button variant="secondary" size="lg" className="flex-1" onClick={() => onEdit()}>Cancel</Button>
+                   <Button variant="primary" size="lg" className="flex-1 shadow-xl shadow-blue-100" onClick={handleSave} disabled={isSaving}>
+                      {isSaving ? 'Saving...' : 'Save Changes'}
+                   </Button>
+                </div>
+             </div>
+           ) : (
+             <>
+               <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                     <h2 className="text-3xl font-black text-slate-900 tracking-tight">{student.name}</h2>
+                     <div className="flex items-center space-x-3">
+                        <Badge variant="blue">{student.regNo}</Badge>
+                        <span className="flex items-center text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                           <Hash size={14} className="mr-1" /> {student.status || 'ACTIVE'}
+                        </span>
+                     </div>
+                  </div>
+                  <div className="flex gap-2">
+                     {isAdmin && (
+                       <>
+                         <Button variant="secondary" size="sm" onClick={onDelete} className="rounded-2xl w-10 h-10 p-0 bg-red-50 hover:bg-red-100 border-none transition-all">
+                            <X size={18} className="text-red-600" />
+                         </Button>
+                         <Button variant="secondary" size="sm" onClick={onEdit} className="rounded-2xl w-10 h-10 p-0 bg-slate-50">
+                            <Edit2 size={18} className="text-blue-600" />
+                         </Button>
+                       </>
+                     )}
+                  </div>
+               </div>
+
+               <div className="grid grid-cols-1 gap-3">
+                  <ProfileItem icon={GraduationCap} label="Program" val={programs.find(p => p.id === student.programId)?.programName || student.programId || 'N/A'} />
+                  <ProfileItem icon={MapPin} label="Center" val={centers.find(c => c.id === student.centerId)?.centerName || student.centerId || 'N/A'} />
+                  <ProfileItem icon={Hash} label="Batch" val={batches.find(b => b.id === student.batchId)?.batchName || student.batchId || '—'} />
+                  <ProfileItem icon={Hash} label="Batch Code" val={student.batchCode || '—'} />
+                  <ProfileItem icon={Calendar} label="Target Year" val={student.targetYear || '—'} />
+               </div>
+
+               <div className="space-y-4">
+                  <h3 className="font-black text-[10px] text-slate-400 uppercase tracking-[0.2em] px-1">Quick Contacts</h3>
+                  <div className="flex space-x-2">
+                     <ContactBtn icon={Smartphone} label="Call" color="bg-blue-600" />
+                     <ContactBtn icon={Mail} label="Email" color="bg-emerald-500" />
+                     <ContactBtn icon={Share2} label="Share" color="bg-slate-900" />
+                  </div>
+               </div>
+
+               <div className="space-y-4">
+                  <h3 className="font-black text-[10px] text-slate-400 uppercase tracking-[0.2em] px-1">Academic Tools</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                     <Card className="p-6 bg-slate-50 border-none flex flex-col items-center justify-center space-y-2 group cursor-pointer active:scale-95 transition-all">
+                        <div className="p-3 bg-white rounded-2xl text-blue-600 shadow-sm group-hover:scale-110 transition-transform">
+                           <Download size={24} />
+                        </div>
+                        <span className="text-[10px] font-black text-slate-900 uppercase">Identity Card</span>
+                     </Card>
+                     <Card className="p-6 bg-slate-50 border-none flex flex-col items-center justify-center space-y-2 group cursor-pointer active:scale-95 transition-all">
+                        <div className="p-3 bg-white rounded-2xl text-purple-600 shadow-sm group-hover:scale-110 transition-transform">
+                           <FileText size={24} />
+                        </div>
+                        <span className="text-[10px] font-black text-slate-900 uppercase">Score History</span>
+                     </Card>
+                  </div>
+               </div>
+             </>
+           )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function ProfileItem({ icon: Icon, label, val }: any) {
+  return (
+    <div className="flex items-center space-x-4 p-5 bg-[#F8FAFC] rounded-3xl border border-slate-100/50">
+       <div className="p-3 bg-white rounded-2xl text-blue-500 shadow-sm">
+          <Icon size={20} strokeWidth={2.5} />
+       </div>
+       <div>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{label}</p>
+          <p className="font-bold text-slate-800 break-all">{val}</p>
+       </div>
+    </div>
+  );
+}
+
+function ContactBtn({ icon: Icon, label, color }: any) {
+  return (
+    <button className={cn("flex-1 py-4 rounded-2xl flex items-center justify-center space-x-2 text-white font-black uppercase tracking-widest text-[9px] shadow-lg active:scale-95 transition-all", color)}>
+       <Icon size={14} strokeWidth={3} />
+       <span>{label}</span>
+    </button>
+  );
+}
+
+export function BottomSheet({ isOpen, onClose, children }: { isOpen: boolean; onClose: () => void; children: React.ReactNode }) {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-[200] flex items-end justify-center p-0">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ y: "100%" }}
+        animate={{ y: 0 }}
+        exit={{ y: "100%" }}
+        className="relative w-full max-w-lg bg-white rounded-t-[3rem] p-8 pb-32 space-y-6 shadow-2xl overflow-y-auto max-h-[90vh] no-scrollbar pb-safe"
+      >
+        <div className="w-12 h-1.5 bg-slate-100 rounded-full mx-auto -mt-2 mb-4" />
+        {children}
+      </motion.div>
+    </div>
+  );
+}

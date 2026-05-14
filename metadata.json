@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "PW Gurukul Management",
+  "description": "Comprehensive management system for PW Gurukul, including student tracking, attendance, faculty management, and performance analytics.",
   "requestFramePermissions": [],
   "majorCapabilities": []
 }
