@@ -90,6 +90,7 @@ export default function Masters() {
         { name: 'teacherName', label: 'Full Name', type: 'text' },
         { name: 'email', label: 'Email Address', type: 'email' },
         { name: 'subjects', label: 'Subjects (comma separated)', type: 'text' },
+        { name: 'centerId', label: 'Assigned Center', type: 'db-select', collection: 'centers', displayField: 'centerName' },
         { name: 'isActive', label: 'Active', type: 'checkbox' }
       ]
     },
@@ -100,6 +101,7 @@ export default function Masters() {
         { name: 'name', label: 'Full Name', type: 'text' },
         { name: 'regNo', label: 'Registration No', type: 'text' },
         { name: 'batchId', label: 'Batch', type: 'db-select', collection: 'batches', displayField: 'batchName' },
+        { name: 'centerId', label: 'Center', type: 'db-select', collection: 'centers', displayField: 'centerName' },
         { name: 'email', label: 'Email', type: 'email' },
         { name: 'phone', label: 'Phone', type: 'text' },
         { name: 'isActive', label: 'Active', type: 'checkbox' }
@@ -123,12 +125,24 @@ export default function Masters() {
         { name: 'batchId', label: 'Batch', type: 'db-select', collection: 'batches', displayField: 'batchName' }
       ]
     },
+    attendance: {
+      title: 'Attendance Master',
+      collection: 'attendance',
+      fields: [
+        { name: 'studentId', label: 'Student', type: 'db-select', collection: 'students', displayField: 'name' },
+        { name: 'batchId', label: 'Batch', type: 'db-select', collection: 'batches', displayField: 'batchName' },
+        { name: 'date', label: 'Date (YYYY-MM-DD)', type: 'text' },
+        { name: 'status', label: 'Status', type: 'select', options: ['Present', 'Absent'] },
+        { name: 'remarks', label: 'Remarks', type: 'text' }
+      ]
+    },
     user_roles: {
       title: 'User Roles',
       collection: 'user_roles',
       fields: [
         { name: 'email', label: 'User Email', type: 'email' },
-        { name: 'role', label: 'Role', type: 'select', options: ['admin', 'operator', 'central_team', 'teacher', 'student'] },
+        { name: 'role', label: 'Role', type: 'select', options: ['admin', 'central_team', 'center_level', 'teacher', 'operator'] },
+        { name: 'centerId', label: 'Assign Center (for Center Level)', type: 'db-select', collection: 'centers', displayField: 'centerName' },
         { name: 'isActive', label: 'Active', type: 'checkbox' }
       ]
     }
@@ -148,7 +162,7 @@ export default function Masters() {
     const options: Record<string, any[]> = {};
     for (const field of config.fields) {
       if (field.type === 'db-select' && 'collection' in field && field.collection) {
-        const querySnapshot = await getDocs(query(collection(db, field.collection), where('isActive', '==', true)));
+        const querySnapshot = await getDocs(collection(db, field.collection));
         options[field.collection] = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       }
     }
@@ -295,12 +309,21 @@ export default function Masters() {
         });
       } else {
         let docRef;
-        if (config.collection === 'user_roles' && formData.email) {
-          // Use email as ID for user_roles to make security rules lookup easier
+        if ((config.collection === 'user_roles' || config.collection === 'teachers') && formData.email) {
+          // Use email as ID for user_roles and teachers to make security rules lookup easier
           const docId = formData.email.toLowerCase().trim();
-          await setDoc(doc(db, 'user_roles', docId), {
+          const targetColl = config.collection;
+          await setDoc(doc(db, targetColl, docId), {
             ...formData,
             isActive: formData.isActive ?? true,
+            createdAt: Timestamp.now()
+          });
+          docRef = { id: docId };
+        } else if (config.collection === 'mappings' && formData.teacherId && formData.batchId) {
+          // Use teacherId_batchId as ID for mappings
+          const docId = `${formData.teacherId}_${formData.batchId}`;
+          await setDoc(doc(db, 'mappings', docId), {
+            ...formData,
             createdAt: Timestamp.now()
           });
           docRef = { id: docId };
@@ -552,7 +575,7 @@ export default function Masters() {
                         required
                       >
                         <option value="">Select From DB</option>
-                        {dbOptions[(field as any).collection]?.map(opt => (
+                        {dbOptions[(field as any).collection]?.filter(opt => opt.isActive || opt.id === formData[field.name]).map(opt => (
                           <option key={opt.id} value={opt.id}>{opt[(field as any).displayField]}</option>
                         ))}
                       </Select>

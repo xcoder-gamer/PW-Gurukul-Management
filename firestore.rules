@@ -1,185 +1,175 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // --- GLOBAL SAFETY NET ---
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // --- SHARED HELPERS ---
     function isSignedIn() {
       return request.auth != null;
     }
 
-    match /test/connection {
-      allow read: if true;
-    }
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
+
     function isValidId(id) { 
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
     }
-    
+
+    // Auth lookup with caching
     function getUserData() {
-      let uidPath = /databases/$(database)/documents/user_roles/$(request.auth.uid);
       let emailLower = request.auth.token.email.lower();
       let emailPath = /databases/$(database)/documents/user_roles/$(emailLower);
-      return exists(uidPath) ? get(uidPath).data : (exists(emailPath) ? get(emailPath).data : null);
+      return get(emailPath).data;
     }
-    
-    function isAuthorized() {
+
+    function getRole() {
       let data = getUserData();
-      let adminEmails = ["devansh.sharma@pw.live", "deepayan.nayak@pw.live", "gurukul.ops@pw.live"];
-      return isSignedIn() && (
-        data != null ||
-        request.auth.token.email.lower() in adminEmails
-      );
+      return data != null ? data.role.lower() : 'guest';
     }
 
     function isAdmin() {
-      let data = getUserData();
+      let role = getRole();
       let adminEmails = ["devansh.sharma@pw.live", "deepayan.nayak@pw.live", "gurukul.ops@pw.live"];
-      return isSignedIn() && (
-        (data != null && (data.role.lower() == 'admin' || data.role.lower() == 'central_team')) ||
-        request.auth.token.email.lower() in adminEmails
-      );
+      return isSignedIn() && (role == 'admin' || request.auth.token.email.lower() in adminEmails);
     }
-    
+
+    function isCentralTeam() {
+      return isSignedIn() && getRole() == 'central_team';
+    }
+
+    function isCenterLevel() {
+      return isSignedIn() && getRole() == 'center_level';
+    }
+
+    function isTeacher() {
+      return isSignedIn() && getRole() == 'teacher';
+    }
+
     function isOperator() {
+      return isSignedIn() && getRole() == 'operator';
+    }
+
+    function getUserCenterId() {
       let data = getUserData();
-      let adminEmails = ["devansh.sharma@pw.live", "deepayan.nayak@pw.live", "gurukul.ops@pw.live"];
-      return isSignedIn() && (
-        (data != null && (data.role.lower() == 'operator' || data.role.lower() == 'admin' || data.role.lower() == 'central_team')) ||
-        request.auth.token.email.lower() in adminEmails
-      );
+      return data.get('centerId', null);
+    }
+
+    // Teacher check
+    function isMappingExists(teacherId, batchId) {
+      let mappingId = teacherId + "_" + batchId;
+      return exists(/databases/$(database)/documents/mappings/$(mappingId));
     }
 
     // --- ENTITY VALIDATIONS ---
     function isValidBatch(data) {
-      return data.batchName is string
-        && (data.keys().hasAll(['programId']) ? data.programId is string : true)
-        && (data.keys().hasAll(['centerId']) ? data.centerId is string : true);
+      return data.batchName is string && data.batchName.size() <= 200
+        && data.programId is string && data.programId.size() <= 128
+        && data.centerId is string && data.centerId.size() <= 128;
     }
 
     function isValidStudent(data) {
-      return data.name is string 
-        && data.regNo is string;
+      return data.name is string && data.name.size() <= 200
+        && data.regNo is string && data.regNo.size() <= 64
+        && data.batchId is string && data.batchId.size() <= 128
+        && (data.get('email', '') is string && data.get('email', '').size() <= 256)
+        && (data.get('phone', '') is string && data.get('phone', '').size() <= 20);
     }
 
-    function isValidQBG(data) {
-      return (data.keys().hasAll(['subject']) ? data.subject is string && data.subject.size() <= 100 : true)
-        && (data.keys().hasAll(['chapter']) ? data.chapter is string && data.chapter.size() <= 200 : true);
-    }
-
-    function isValidQBGLibrary(data) {
-      return data.keys().hasAll(['subject', 'subjectId'])
-        && data.subject is string && data.subject.size() <= 100
-        && data.subjectId is string && data.subjectId.size() <= 128
-        && (data.keys().hasAny(['data']) ? data.data is map : true);
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['studentId', 'batchId', 'date', 'status'])
+        && data.studentId is string && data.studentId.size() <= 128
+        && data.batchId is string && data.batchId.size() <= 128
+        && data.date is string && data.date.size() <= 20
+        && data.status in ['Present', 'Absent'];
     }
 
     function isValidTest(data) {
       return data.keys().hasAll(['name', 'date', 'batchIds', 'totalQuestions', 'answerKey'])
         && data.name is string && data.name.size() <= 200
-        && data.batchIds is list
+        && data.batchIds is list && data.batchIds.size() <= 50
         && data.totalQuestions is number
         && data.answerKey is map;
     }
 
     function isValidResult(data) {
-      return data.keys().hasAll(['testId', 'regNo', 'score', 'accuracy', 'evaluatedAt'])
-        && data.testId is string
-        && data.regNo is string
-        && data.score is number
-        && data.accuracy is number;
+      return data.keys().hasAll(['testId', 'regNo', 'score', 'accuracy'])
+        && data.testId is string && data.testId.size() <= 128
+        && data.regNo is string && data.regNo.size() <= 64
+        && data.score is number && data.accuracy is number;
     }
 
-    function isValidLog(data) {
-      return data.keys().hasAll(['userId', 'userEmail', 'action', 'category', 'resourceId', 'resourceName', 'details', 'timestamp'])
-        && data.userId is string
-        && data.userEmail is string
-        && data.action is string
-        && data.category is string
-        && data.timestamp == request.time;
-    }
+    // --- COLLECTION RULES ---
 
-    // --- RULES ---
-
-    match /user_roles/{id} {
-      allow read: if isSignedIn() && (request.auth.uid == id || request.auth.token.email.lower() == id.lower() || isAdmin());
-      allow create, update: if isAdmin() || (
-        isSignedIn() && (request.auth.uid == id || request.auth.token.email.lower() == id.lower())
-        && incoming().keys().hasAll(['role', 'email'])
-        && incoming().role.lower() in ['admin', 'operator', 'central_team', 'user', 'teacher', 'student']
-        && incoming().email.lower() == request.auth.token.email.lower()
-        && (incoming().role.lower() == "admin" ? incoming().email.lower() in ["devansh.sharma@pw.live", "deepayan.nayak@pw.live", "gurukul.ops@pw.live"] : true)
-      );
-      allow delete: if isAdmin();
-    }
-
-    match /testPatterns/{id} {
-      allow read: if isAuthorized();
+    match /user_roles/{email} {
+      allow read: if isSignedIn() && (request.auth.token.email.lower() == email.lower() || isAdmin() || isCentralTeam());
       allow write: if isAdmin();
     }
 
-    match /test_patterns/{id} {
-        allow read: if isAuthorized();
-        allow write: if isAdmin();
-    }
-
     match /programs/{programId} {
-      allow read: if isAuthorized();
-      allow write: if isAdmin() || isOperator();
+      allow read: if isSignedIn();
+      allow write: if (isAdmin() || isOperator()) && isValidId(programId);
     }
 
     match /centers/{centerId} {
-      allow read: if isAuthorized();
+      allow read: if isSignedIn();
       allow write: if (isAdmin() || isOperator()) && isValidId(centerId);
     }
 
     match /batches/{batchId} {
-      allow read: if isAuthorized();
-      allow create, update: if (isAdmin() || isOperator()) && isValidId(batchId) && isValidBatch(incoming());
-      allow delete: if isAdmin() || isOperator();
+      allow read: if isAdmin() || isCentralTeam() 
+        || (isCenterLevel() && resource.data.centerId == getUserCenterId())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), batchId));
+      allow create: if (isAdmin() || isOperator()) && isValidId(batchId) && isValidBatch(incoming());
+      allow update: if (isAdmin() || isOperator()) && isValidBatch(incoming());
+      allow delete: if isAdmin();
     }
 
     match /students/{studentId} {
-      allow read: if isAuthorized();
-      allow create, update: if (isAdmin() || isOperator()) && isValidId(studentId) && isValidStudent(incoming());
-      allow delete: if isAdmin() || isOperator();
+      allow read: if isAdmin() || isCentralTeam()
+        || (isCenterLevel() && resource.data.centerId == getUserCenterId())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), resource.data.batchId));
+      allow create: if (isAdmin() || isOperator()) && isValidId(studentId) && isValidStudent(incoming());
+      allow update: if (isAdmin() || isOperator()) && isValidStudent(incoming());
+      allow delete: if isAdmin();
     }
 
     match /tests/{testId} {
-      allow read: if isAuthorized();
-      allow create, update: if (isAdmin() || isOperator()) && isValidId(testId) && isValidTest(incoming());
-      allow delete: if isAdmin() || isOperator();
+        allow read: if isAdmin() || isCentralTeam() || isCenterLevel() || isTeacher();
+        allow create: if (isAdmin() || isOperator()) && isValidId(testId) && isValidTest(incoming());
+        allow update: if (isAdmin() || isOperator()) && isValidTest(incoming());
+        allow delete: if isAdmin();
     }
 
     match /results/{resultId} {
-      allow read: if isAuthorized();
-      allow write: if isAdmin() || isOperator();
+      allow read: if isAdmin() || isCentralTeam()
+        || (isCenterLevel() && get(/databases/$(database)/documents/students/$(resource.data.regNo)).data.centerId == getUserCenterId())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), get(/databases/$(database)/documents/students/$(resource.data.regNo)).data.batchId));
+      allow create: if (isAdmin() || isOperator()) && isValidId(resultId) && isValidResult(incoming());
+      allow update: if (isAdmin() || isOperator()) && isValidResult(incoming());
+      allow delete: if isAdmin();
     }
 
-    match /result_updated/{resultId} {
-      allow read: if isAuthorized();
-      allow write: if isSignedIn();
+    match /attendance/{id} {
+      allow read: if isAdmin() || isCentralTeam()
+        || (isCenterLevel() && resource.data.centerId == getUserCenterId())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), resource.data.batchId));
+      allow create: if (isAdmin() || isOperator()) && isValidId(id) && isValidAttendance(incoming())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), incoming().batchId) && isValidAttendance(incoming()));
+      allow update: if (isAdmin() || isOperator()) && isValidAttendance(incoming())
+        || (isTeacher() && isMappingExists(request.auth.token.email.lower(), existing().batchId) && isValidAttendance(incoming()));
     }
 
-    match /qbgMaster/{id} {
-      allow read: if isAuthorized();
-      allow create, update: if (isAdmin() || isOperator()) && isValidId(id) && isValidQBG(incoming());
-      allow delete: if isAdmin() || isOperator();
-    }
-
-    match /qbgLibrary/{id} {
-      allow read: if isAuthorized();
-      allow create, update: if (isAdmin() || isOperator()) && isValidId(id) && isValidQBGLibrary(incoming());
-      allow delete: if isAdmin() || isOperator();
-    }
-
-    match /teachers/{id} {
-      allow read: if isAuthorized();
-      allow write: if (isAdmin() || isOperator()) && isValidId(id);
+    match /teachers/{email} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /mappings/{id} {
-      allow read: if isAuthorized();
-      allow write: if isAdmin() || isOperator();
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /logs/{logId} {
@@ -187,9 +177,14 @@ service cloud.firestore {
       allow create: if isSignedIn();
     }
 
-    // Default deny at the bottom
-    match /{document=**} {
-      allow read, write: if false;
+    match /qbgMaster/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isOperator();
+    }
+
+    match /testPatterns/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
   }
 }

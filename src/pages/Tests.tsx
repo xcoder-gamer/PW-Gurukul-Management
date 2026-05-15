@@ -57,11 +57,11 @@ export default function Tests() {
     const fetchMasters = async () => {
       try {
         const [progSnap, batchSnap, testSnap, qbgSnap, centerSnap, patternSnap] = await Promise.all([
-          getDocs(query(collection(db, 'programs'), where('isActive', '==', true))),
-          getDocs(query(collection(db, 'batches'), where('isActive', '==', true))),
+          getDocs(collection(db, 'programs')),
+          getDocs(collection(db, 'batches')),
           getDocs(collection(db, 'tests')),
           getDocs(collection(db, 'qbgLibrary')),
-          getDocs(query(collection(db, 'centers'), where('isActive', '==', true))),
+          getDocs(collection(db, 'centers')),
           getDocs(collection(db, 'testPatterns'))
         ]);
         setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -716,7 +716,7 @@ export default function Tests() {
                   <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">Program</label>
                   <Select value={formData.programId} onChange={e => setFormData({...formData, programId: e.target.value, batchIds: []})}>
                     <option value="">Select Program...</option>
-                    {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                    {programs.filter(p => p.isActive || p.id === formData.programId).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
                   </Select>
                 </div>
               </div>
@@ -735,7 +735,7 @@ export default function Tests() {
               <div className="space-y-3">
                 <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto no-scrollbar pb-4 pr-1 border-2 border-slate-50 rounded-3xl p-4">
                   {formData.programId ? (
-                    batches.filter(b => b.programId === formData.programId).map(b => (
+                    batches.filter(b => b.programId === formData.programId && (b.isActive || formData.batchIds.includes(b.id))).map(b => (
                       <Card 
                         key={b.id} 
                         className={cn(
@@ -766,9 +766,9 @@ export default function Tests() {
                       <p className="text-xs font-black uppercase tracking-widest">Select Program First</p>
                     </div>
                   )}
-                  {formData.programId && batches.filter(b => b.programId === formData.programId).length === 0 && (
+                  {formData.programId && batches.filter(b => b.programId === formData.programId && (b.isActive || formData.batchIds.includes(b.id))).length === 0 && (
                     <div className="p-8 text-center bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                      <p className="text-slate-400 font-bold text-sm">No batches found for this program</p>
+                      <p className="text-slate-400 font-bold text-sm">No active batches found for this program</p>
                     </div>
                   )}
                 </div>
@@ -1373,7 +1373,7 @@ export default function Tests() {
                 className="bg-white"
               >
                 <option value="">All Centers</option>
-                {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
               </Select>
             </div>
             <div className="space-y-1">
@@ -1385,7 +1385,7 @@ export default function Tests() {
               >
                 <option value="">All Batches</option>
                 {batches
-                  .filter(b => !filters.centerId || b.centerId === filters.centerId)
+                  .filter(b => b.isActive && (!filters.centerId || b.centerId === filters.centerId))
                   .map(b => <option key={b.id} value={b.id}>{b.batchName}</option>)
                 }
               </Select>

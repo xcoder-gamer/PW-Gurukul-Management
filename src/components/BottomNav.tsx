@@ -8,15 +8,14 @@ import { useAuth } from '../context/AuthContext';
 
 export function BottomNav() {
   const { role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
 
   const navItems = [
-    { to: '/', icon: Home, label: 'Home', adminOnly: true },
-    { to: '/students', icon: Users, label: 'Students' },
-    { to: '/tests', icon: BookOpen, label: 'Tests', adminOnly: true },
-    { to: '/results', icon: BarChart3, label: 'Analysis' },
-    { to: '/more', icon: MoreHorizontal, label: 'More', adminOnly: true },
-  ].filter(item => !item.adminOnly || isAdmin);
+    { to: '/', icon: Home, label: 'Home', allow: ['admin', 'operator', 'central_team'] },
+    { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
+    { to: '/tests', icon: BookOpen, label: 'Tests', allow: ['admin', 'operator', 'central_team', 'center_level'] },
+    { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
+    { to: '/more', icon: MoreHorizontal, label: 'More', allow: ['admin', 'operator'] },
+  ].filter(item => !role || item.allow.includes(role));
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 h-20 bg-white/95 backdrop-blur-xl border-t border-slate-200/50 flex items-center justify-around px-4 z-[50] shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-safe md:hidden">

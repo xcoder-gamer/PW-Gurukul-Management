@@ -16,17 +16,28 @@ import { useAuth } from '../context/AuthContext';
 
 export function Sidebar() {
   const { logout, user, role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-
+  const isAdmin = role === 'admin' || role === 'operator';
+  
   const navItems = [
-    { to: '/', icon: Home, label: 'Dashboard', adminOnly: true },
-    { to: '/students', icon: Users, label: 'Students' },
-    { to: '/tests', icon: BookOpen, label: 'Test Series', adminOnly: true },
-    { to: '/results', icon: BarChart3, label: 'Analysis' },
-    { to: '/masters/qbg', icon: Database, label: 'QBG Master', adminOnly: true },
-    { to: '/logs', icon: LayoutDashboard, label: 'Audit Logs', adminOnly: true },
-    { to: '/more', icon: MoreHorizontal, label: 'Settings', adminOnly: true },
-  ].filter(item => !item.adminOnly || isAdmin);
+    { to: '/', icon: Home, label: 'Dashboard', allow: ['admin', 'operator', 'central_team'] },
+    { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
+    { to: '/tests', icon: BookOpen, label: 'Test Series', allow: ['admin', 'operator', 'central_team', 'center_level'] },
+    { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
+    { to: '/masters/qbg', icon: Database, label: 'QBG Master', allow: ['admin', 'operator'] },
+    { to: '/logs', icon: LayoutDashboard, label: 'Audit Logs', allow: ['admin', 'operator'] },
+    { to: '/more', icon: MoreHorizontal, label: 'Settings', allow: ['admin', 'operator'] },
+  ].filter(item => !role || item.allow.includes(role));
+
+  const roleLabel = () => {
+    switch(role) {
+      case 'admin': return 'Administrator';
+      case 'central_team': return 'Central Team';
+      case 'center_level': return 'Center Admin';
+      case 'teacher': return 'Academic Mentor';
+      case 'operator': return 'Operator';
+      default: return 'Staff';
+    }
+  };
 
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-64 bg-white border-r border-slate-200 hidden md:flex flex-col z-[60]">
@@ -77,7 +88,7 @@ export function Sidebar() {
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold text-slate-900 truncate">{user?.email?.split('@')[0]}</p>
             <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight">
-              {isAdmin ? 'Administrator' : 'User'}
+              {roleLabel()}
             </p>
           </div>
         </div>

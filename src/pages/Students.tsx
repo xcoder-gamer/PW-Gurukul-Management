@@ -23,7 +23,7 @@ import {
   Edit2
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, getDocs, query, where, Timestamp, orderBy, limit, updateDoc, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where, Timestamp, serverTimestamp, orderBy, limit, updateDoc, doc, deleteDoc, writeBatch, setDoc } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -34,7 +34,10 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Students() {
   const { user, role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator';
+  const isViewOnly = role === 'central_team' || role === 'center_level' || role === 'teacher';
+  const canEdit = isAdmin;
+  
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -89,9 +92,9 @@ export default function Students() {
 
   const fetchMasters = async () => {
     const [progSnap, centSnap, batchSnap] = await Promise.all([
-      getDocs(query(collection(db, 'programs'), where('isActive', '==', true))),
-      getDocs(query(collection(db, 'centers'), where('isActive', '==', true))),
-      getDocs(query(collection(db, 'batches'), where('isActive', '==', true)))
+      getDocs(collection(db, 'programs')),
+      getDocs(collection(db, 'centers')),
+      getDocs(collection(db, 'batches'))
     ]);
     setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     setCenters(centSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -121,8 +124,10 @@ export default function Students() {
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const docRef = await addDoc(collection(db, 'students'), {
+      const docId = newStudent.regNo.trim().toUpperCase();
+      await setDoc(doc(db, 'students', docId), {
         ...newStudent,
+        regNo: docId,
         createdAt: Timestamp.now()
       });
 
@@ -131,10 +136,10 @@ export default function Students() {
         userEmail: user?.email || 'unknown',
         action: LogAction.CREATE,
         category: LogCategory.STUDENT,
-        resourceId: docRef.id,
+        resourceId: docId,
         resourceName: newStudent.name,
-        details: `Student ${newStudent.name} (${newStudent.regNo}) added manually`,
-        newData: { name: newStudent.name, regNo: newStudent.regNo }
+        details: `Student ${newStudent.name} (${docId}) added manually`,
+        newData: { name: newStudent.name, regNo: docId }
       });
 
       setIsAddModalOpen(false);
@@ -197,17 +202,8 @@ export default function Students() {
 
     setLoading(true);
     try {
-      // 1. Fetch existing regNo mapping for upsert logic
-      const existingSnap = await getDocs(collection(db, 'students'));
-      const regNoToId = new Map();
-      existingSnap.docs.forEach(doc => {
-        const d = doc.data();
-        if (d.regNo) regNoToId.set(String(d.regNo).toUpperCase(), doc.id);
-      });
-
       const batchSize = 500;
       let appends = 0;
-      let updates = 0;
       
       // Process in chunks of 500
       for (let i = 0; i < data.length; i += batchSize) {
@@ -226,15 +222,14 @@ export default function Students() {
           const regNo = String(normalizedRow.regno || normalizedRow.registrationno || normalizedRow.rollno || '').trim().toUpperCase();
 
           if (name && regNo) {
-            const existingId = regNoToId.get(regNo);
-            const studentDoc = existingId ? doc(db, 'students', existingId) : doc(collection(db, 'students'));
+            const studentDoc = doc(db, 'students', regNo);
             
             // Resolve program/center/batch names to IDs
             let progId = normalizedRow.programid || '';
             if (!progId && normalizedRow.program) {
                const found = programs.find(p => p.programName?.toLowerCase() === String(normalizedRow.program).toLowerCase());
                if (found) progId = found.id;
-               else progId = String(normalizedRow.program).trim(); // Keep raw if not found
+               else progId = String(normalizedRow.program).trim(); 
             }
 
             let centId = normalizedRow.centerid || '';
@@ -242,7 +237,7 @@ export default function Students() {
                const centerSearch = normalizedRow.center || normalizedRow.centername;
                const found = centers.find(c => c.centerName?.toLowerCase() === String(centerSearch).toLowerCase());
                if (found) centId = found.id;
-               else centId = String(centerSearch).trim(); // Keep raw if not found
+               else centId = String(centerSearch).trim(); 
             }
 
             let bId = normalizedRow.batchid || '';
@@ -250,7 +245,7 @@ export default function Students() {
                const batchSearch = normalizedRow.batch || normalizedRow.batchname;
                const found = batches.find(b => b.batchName?.toLowerCase() === String(batchSearch).toLowerCase());
                if (found) bId = found.id;
-               else bId = String(batchSearch).trim(); // Keep raw if not found
+               else bId = String(batchSearch).trim(); 
             }
 
             const sanitizedStudent: any = {
@@ -269,15 +264,9 @@ export default function Students() {
               updatedAt: Timestamp.now()
             };
 
-            if (existingId) {
-              batch.update(studentDoc, sanitizedStudent);
-              updates++;
-            } else {
-              sanitizedStudent.status = 'active';
-              sanitizedStudent.createdAt = Timestamp.now();
-              batch.set(studentDoc, sanitizedStudent);
-              appends++;
-            }
+            // Upsert student with set merge:true
+            batch.set(studentDoc, { ...sanitizedStudent, status: 'active', createdAt: serverTimestamp() }, { merge: true });
+            appends++;
             batchCount++;
           }
         }
@@ -287,8 +276,8 @@ export default function Students() {
         }
       }
 
-      if (appends > 0 || updates > 0) {
-        toast.success(`Processed: ${appends} added, ${updates} updated`);
+      if (appends > 0) {
+        toast.success(`Processed: ${appends} records`);
         
         await addLog({
           userId: user?.uid || 'system',
@@ -297,7 +286,7 @@ export default function Students() {
           category: LogCategory.STUDENT,
           resourceId: 'bulk-upsert',
           resourceName: 'Bulk Student Upsert',
-          details: `Bulk Import: ${appends} new students added, ${updates} existing students updated.`,
+          details: `Bulk Import: ${appends} students processed via upsert.`,
         });
 
         setIsUploadModalOpen(false);
@@ -797,7 +786,7 @@ export default function Students() {
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Batch Code</label>
               <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
                 <option value="">All Batch Codes</option>
-                {batches.map(b => (
+                {batches.filter(b => b.isActive).map(b => (
                   (!filters.program || b.programId === filters.program) && 
                   (!filters.center || b.centerId === filters.center) &&
                   <option key={b.id} value={b.id}>{b.batchName}</option>
@@ -806,16 +795,16 @@ export default function Students() {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Program</label>
-              <Select value={filters.program} onChange={e => setFilters({...filters, program: e.target.value})}>
+              <Select value={filters.program} onChange={e => setFilters({...filters, program: e.target.value, batch: ''})}>
                 <option value="">All Programs</option>
-                {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                {programs.filter(p => p.isActive).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
               </Select>
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Center</label>
-              <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value})}>
+              <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value, batch: ''})}>
                 <option value="">All Centers</option>
-                {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
               </Select>
             </div>
           </div>
@@ -860,7 +849,7 @@ export default function Students() {
                 });
               }} required>
                 <option value="">Enroll in Batch</option>
-                {batches.map(b => (
+                {batches.filter(b => b.isActive).map(b => (
                   (!newStudent.programId || b.programId === newStudent.programId) && 
                   (!newStudent.centerId || b.centerId === newStudent.centerId) &&
                   <option key={b.id} value={b.id}>{b.batchName}</option>
@@ -902,13 +891,13 @@ export default function Students() {
               </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <Select value={newStudent.programId} onChange={e => setNewStudent({...newStudent, programId: e.target.value})} required>
+              <Select value={newStudent.programId} onChange={e => setNewStudent({...newStudent, programId: e.target.value, batchId: ''})} required>
                 <option value="">Program</option>
-                {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                {programs.filter(p => p.isActive).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
               </Select>
-              <Select value={newStudent.centerId} onChange={e => setNewStudent({...newStudent, centerId: e.target.value})} required>
+              <Select value={newStudent.centerId} onChange={e => setNewStudent({...newStudent, centerId: e.target.value, batchId: ''})} required>
                  <option value="">Center</option>
-                 {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                 {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
               </Select>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -967,22 +956,34 @@ export default function Students() {
               variant="secondary" 
               size="md" 
               onClick={() => {
-                const ws = XLSX.utils.json_to_sheet([
-                  { 
-                    regNo: 'PW24001', 
-                    name: 'Vishal Kumar', 
-                    gender: 'Male',
-                    program: 'JEE Main',
-                    center: 'Kota Main',
-                    batch: 'Evening Batch',
-                    batchCode: 'JB-24-A',
-                    type: 'Hosteller',
-                    targetYear: '2025',
+                const sampleRows = Array.from({ length: 10 }).map((_, i) => {
+                  const activeProgs = programs.filter(p => p.isActive);
+                  const activeCenters = centers.filter(c => c.isActive);
+                  const activeBatches = batches.filter(b => b.isActive);
+                  
+                  const prog = activeProgs[i % activeProgs.length] || { programName: 'JEE Main', id: 'PROG001' };
+                  const center = activeCenters[i % activeCenters.length] || { centerName: 'Kota Main', id: 'CENT001' };
+                  const batch = activeBatches.find(b => b.programId === prog.id && b.centerId === center.id) || activeBatches[i % activeBatches.length] || { batchName: 'Alpha-1', id: 'BATCH001', batchCode: 'JB-26-A' };
+
+                  return {
+                    regNo: `PW${26000 + i + 1}`, 
+                    name: `Student ${i + 1}`, 
+                    gender: i % 2 === 0 ? 'Male' : 'Female',
+                    program: prog.programName,
+                    programId: prog.id,
+                    center: center.centerName,
+                    centerId: center.id,
+                    batch: batch.batchName,
+                    batchId: batch.id,
+                    batchCode: batch.batchCode || batch.batchName,
+                    type: i % 3 === 0 ? 'Hosteller' : 'Day Boarding',
+                    targetYear: '2026',
                     rankTarget: 'Under 500',
-                    phone: '9876543210', 
-                    email: 'vishal@example.com' 
-                  }
-                ]);
+                    phone: `98765432${10 + i}`, 
+                    email: `student${i + 1}@example.com` 
+                  };
+                });
+                const ws = XLSX.utils.json_to_sheet(sampleRows);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "Students");
                 XLSX.writeFile(wb, "Student_Upload_Template.xlsx");
@@ -1220,7 +1221,7 @@ function StudentProfile({
                              });
                            }}>
                              <option value="">Select</option>
-                             {batches.map(b => (
+                             {batches.filter(b => b.isActive || b.id === formData.batchId).map(b => (
                                (!formData.programId || b.programId === formData.programId) && 
                                (!formData.centerId || b.centerId === formData.centerId) &&
                                <option key={b.id} value={b.id}>{b.batchName}</option>
@@ -1281,16 +1282,16 @@ function StudentProfile({
                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Program</label>
-                         <Select value={formData.programId} onChange={e => setFormData({...formData, programId: e.target.value})}>
+                         <Select value={formData.programId} onChange={e => setFormData({...formData, programId: e.target.value, batchId: ''})}>
                             <option value="">Select</option>
-                            {programs.map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                            {programs.filter(p => p.isActive || p.id === formData.programId).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
                          </Select>
                       </div>
                       <div className="space-y-1">
                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
-                         <Select value={formData.centerId} onChange={e => setFormData({...formData, centerId: e.target.value})}>
+                         <Select value={formData.centerId} onChange={e => setFormData({...formData, centerId: e.target.value, batchId: ''})}>
                             <option value="">Select</option>
-                            {centers.map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                            {centers.filter(c => c.isActive || c.id === formData.centerId).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
                          </Select>
                       </div>
                    </div>

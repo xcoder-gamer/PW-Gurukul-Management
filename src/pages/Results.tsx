@@ -350,6 +350,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 export default function Results() {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const canEdit = role === 'admin' || role === 'operator';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
   const [isReevaluating, setIsReevaluating] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -385,7 +386,10 @@ export default function Results() {
     topOnly: false,
     subject: 'all',
     difficulty: 'all',
-    testMode: 'all' as 'all' | 'offline' | 'online'
+    testMode: 'all' as 'all' | 'offline' | 'online',
+    programId: '',
+    centerId: '',
+    batchId: ''
   });
 
   const sortedResults = useMemo(() => {
@@ -443,6 +447,18 @@ export default function Results() {
       filtered = filtered.filter(r => (r.testMode || 'offline') === filters.testMode);
     }
 
+    if (filters.programId) {
+      filtered = filtered.filter(r => r.programId === filters.programId);
+    }
+
+    if (filters.centerId) {
+      filtered = filtered.filter(r => r.centerId === filters.centerId);
+    }
+
+    if (filters.batchId) {
+      filtered = filtered.filter(r => r.batchId === filters.batchId);
+    }
+
     const sorted = filtered.sort((a, b) => {
       if (resultsSortConfig) {
         let aVal = a[resultsSortConfig.key];
@@ -494,9 +510,9 @@ export default function Results() {
   const fetchMasters = async () => {
     try {
       const [p, c, b] = await Promise.all([
-        getDocs(query(collection(db, 'programs'), where('isActive', '==', true))),
-        getDocs(query(collection(db, 'centers'), where('isActive', '==', true))),
-        getDocs(query(collection(db, 'batches'), where('isActive', '==', true)))
+        getDocs(collection(db, 'programs')),
+        getDocs(collection(db, 'centers')),
+        getDocs(collection(db, 'batches'))
       ]);
       setMasters({
         programs: p.docs.map(d => ({ id: d.id, ...d.data() })),
@@ -980,7 +996,7 @@ export default function Results() {
             Export CSV
           </Button>
 
-          {isAdmin && selectedResultIds.length > 0 && (
+          {canEdit && selectedResultIds.length > 0 && (
             <Button 
               variant="outline" 
               size="md" 
@@ -1022,7 +1038,7 @@ export default function Results() {
               Advanced Filter
             </Button>
           )}
-          {isAdmin && (
+          {canEdit && (
             <Button variant="primary" size="md" onClick={() => {
               if (selectedTestIds.length === 0) {
                 toast.error('Please select a test first');
@@ -1036,7 +1052,7 @@ export default function Results() {
               Add Result
             </Button>
           )}
-          {isAdmin && (
+          {canEdit && (
             <Button 
               variant="outline" 
               size="md" 
@@ -1048,7 +1064,7 @@ export default function Results() {
               Sync Metadata
             </Button>
           )}
-          {isAdmin && (
+          {canEdit && (
             <Button 
               variant="outline" 
               size="md" 
@@ -1060,7 +1076,7 @@ export default function Results() {
               {isReevaluating ? 'Evaluating...' : selectedTestIds.length > 0 ? 'Re-evaluate Selected' : 'Re-evaluate All Results'}
             </Button>
           )}
-          {isAdmin && (
+          {canEdit && (
             <Button variant="outline" size="md" onClick={() => setIsBulkUploadOpen(true)} className="border-slate-200">
               <Upload size={18} className="mr-2 text-purple-600" />
               Bulk OMR
@@ -1417,6 +1433,49 @@ export default function Results() {
                   </Select>
                 </div>
                 <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Program</label>
+                  <Select 
+                    value={filters.programId} 
+                    onChange={e => setFilters({...filters, programId: e.target.value, batchId: ''})}
+                    className="rounded-2xl border-slate-100 font-bold"
+                  >
+                    <option value="">All Programs</option>
+                    {masters.programs.filter((p: any) => p.isActive).map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.programName}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Center</label>
+                  <Select 
+                    value={filters.centerId} 
+                    onChange={e => setFilters({...filters, centerId: e.target.value, batchId: ''})}
+                    className="rounded-2xl border-slate-100 font-bold"
+                  >
+                    <option value="">All Centers</option>
+                    {masters.centers.filter((c: any) => c.isActive).map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.centerName}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Batch</label>
+                  <Select 
+                    value={filters.batchId} 
+                    onChange={e => setFilters({...filters, batchId: e.target.value})}
+                    className="rounded-2xl border-slate-100 font-bold"
+                  >
+                    <option value="">All Batches</option>
+                    {masters.batches.filter((b: any) => 
+                      b.isActive && 
+                      (!filters.programId || b.programId === filters.programId) &&
+                      (!filters.centerId || b.centerId === filters.centerId)
+                    ).map((b: any) => (
+                      <option key={b.id} value={b.id}>{b.batchName}</option>
+                    ))}
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Test Mode</label>
                   <Select 
                     value={filters.testMode} 
@@ -1499,7 +1558,17 @@ export default function Results() {
                 size="lg" 
                 className="flex-1 py-6 rounded-3xl border-slate-200 font-bold text-slate-400 hover:bg-slate-50 transition-colors"
                 onClick={() => {
-                  setFilters({ minAccuracy: 0, minMathAccuracy: 0, topOnly: false, subject: 'all', difficulty: 'all', testMode: 'all' });
+                  setFilters({ 
+                    minAccuracy: 0, 
+                    minMathAccuracy: 0, 
+                    topOnly: false, 
+                    subject: 'all', 
+                    difficulty: 'all', 
+                    testMode: 'all',
+                    programId: '',
+                    centerId: '',
+                    batchId: ''
+                  });
                   setIsAdvancedFilterOpen(false);
                 }}
               >

@@ -119,7 +119,7 @@ import { BookOpen } from 'lucide-react';
 function HomeSelector() {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-  if (role && !isAdmin) {
+  if (role === 'teacher' || role === 'center_level') {
     return <Navigate to="/students" />;
   }
   return <Home />;
@@ -128,8 +128,15 @@ function HomeSelector() {
 function AdminRoute({ children }: { children: React.ReactNode }) {
   const { role, loading } = useAuth();
   if (loading) return null;
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-  if (!isAdmin) return <Navigate to="/students" />;
+  const isAuthorized = role === 'admin' || role === 'operator';
+  if (!isAuthorized) return <Navigate to="/students" />;
+  return <>{children}</>;
+}
+
+function RestrictedRoute({ children, allow }: { children: React.ReactNode, allow: string[] }) {
+  const { role, loading } = useAuth();
+  if (loading) return null;
+  if (!role || !allow.includes(role)) return <Navigate to="/students" />;
   return <>{children}</>;
 }
 
@@ -141,9 +148,9 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<PrivateRoute><HomeSelector /></PrivateRoute>} />
-          <Route path="/students" element={<PrivateRoute><Students /></PrivateRoute>} />
-          <Route path="/tests" element={<PrivateRoute><AdminRoute><Tests /></AdminRoute></PrivateRoute>} />
-          <Route path="/results" element={<PrivateRoute><Results /></PrivateRoute>} />
+          <Route path="/students" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Students /></RestrictedRoute></PrivateRoute>} />
+          <Route path="/tests" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level']}><Tests /></RestrictedRoute></PrivateRoute>} />
+          <Route path="/results" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Results /></RestrictedRoute></PrivateRoute>} />
           <Route path="/more" element={<PrivateRoute><AdminRoute><More /></AdminRoute></PrivateRoute>} />
           <Route path="/masters/qbg" element={<PrivateRoute><AdminRoute><QBG /></AdminRoute></PrivateRoute>} />
           <Route path="/masters/patterns" element={<PrivateRoute><AdminRoute><Patterns /></AdminRoute></PrivateRoute>} />
