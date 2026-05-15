@@ -290,7 +290,7 @@ export default function Tests() {
                 unattempt: parseFloat(row['unattempt'] || row.unattempted || 0),
                 partial: part,
                 type: type,
-                paper: currentPaper || row['Year-Paper'] || row.paper
+                paper: currentPaper || row['Year-Paper'] || row.paper || ''
               };
             }
           });
@@ -475,6 +475,11 @@ export default function Tests() {
         });
       } else {
         finalAnswerKey = { ...formData.answerKey };
+        // Clean up any undefined values that break Firestore
+        Object.keys(finalAnswerKey).forEach(qNum => {
+          if (finalAnswerKey[qNum].paper === undefined) finalAnswerKey[qNum].paper = '';
+        });
+
         if (formData.subQbgMapping && finalAnswerKey) {
           Object.keys(formData.subQbgMapping).forEach(qNum => {
             if (finalAnswerKey[qNum]) {
@@ -514,8 +519,17 @@ export default function Tests() {
 
       const nextVersion = editingId ? (tests.find(t => t.id === editingId)?.answerKeyVersion || 1) + 1 : 1;
       const payload = {
-        ...formData,
+        name: formData.name || 'Untitled Test',
+        date: formData.date || '',
+        pattern: formData.pattern || 'NEET',
+        advancedPapers: formData.advancedPapers || [],
+        programId: formData.programId || '',
+        batchIds: formData.batchIds || [],
+        totalQuestions: formData.totalQuestions || 0,
         answerKey: finalAnswerKey,
+        paperKeys: formData.paperKeys || {},
+        paperMappings: formData.paperMappings || {},
+        subQbgMapping: formData.subQbgMapping || null,
         maxScore: testMaxScore,
         isActive: !isDraft,
         status: isDraft ? 'DRAFT' : 'ACTIVE',
@@ -523,9 +537,21 @@ export default function Tests() {
         updatedAt: Timestamp.now()
       };
 
+      // Sanitize payload to remove undefined values which Firestore rejects
+      const sanitize = (obj: any): any => {
+        if (obj === null || typeof obj !== 'object' || obj instanceof Timestamp) return obj;
+        if (Array.isArray(obj)) return obj.map(v => sanitize(v));
+        const newObj: any = {};
+        Object.entries(obj).forEach(([k, v]) => {
+          if (v !== undefined) newObj[k] = sanitize(v);
+        });
+        return newObj;
+      };
+      const sanitizedPayload = sanitize(payload);
+
       if (editingId) {
         const { updateDoc, doc } = await import('firebase/firestore');
-        await updateDoc(doc(db, 'tests', editingId), payload);
+        await updateDoc(doc(db, 'tests', editingId), sanitizedPayload);
         
         await addLog({
           userId: user?.uid || 'system',
@@ -539,7 +565,7 @@ export default function Tests() {
         });
       } else {
         const docRef = await addDoc(collection(db, 'tests'), {
-          ...payload,
+          ...sanitizedPayload,
           createdAt: Timestamp.now()
         });
 
@@ -555,7 +581,7 @@ export default function Tests() {
         });
       }
 
-      alert(isDraft ? `Draft saved successfully! (Version ${nextVersion})` : `Test activated successfully! (Version ${nextVersion})`);
+      toast.success(isDraft ? `Draft saved successfully! (Version ${nextVersion})` : `Test activated successfully! (Version ${nextVersion})`);
       
       // Refresh list and reset
       const testSnap = await getDocs(collection(db, 'tests'));
@@ -659,9 +685,14 @@ export default function Tests() {
                     value={formData.pattern} 
                     onChange={e => {
                       const val = e.target.value as any;
+                      let newQCount = formData.totalQuestions;
+                      if (val === 'JEE_MAIN') newQCount = 90;
+                      if (val === 'NEET') newQCount = 200;
+                      
                       setFormData({
                         ...formData, 
                         pattern: val,
+                        totalQuestions: newQCount,
                         advancedPapers: val === 'JEE_ADVANCED' ? formData.advancedPapers : []
                       });
                     }}

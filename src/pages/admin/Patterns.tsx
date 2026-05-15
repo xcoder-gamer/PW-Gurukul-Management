@@ -73,8 +73,8 @@ export default function Patterns() {
     setLoading(true);
     try {
       const defaults = [
-        { name: 'JEE_MAIN', totalQuestions: 75, markingScheme: { positive: 4, negative: -1, partial: false } },
-        { name: 'NEET', totalQuestions: 180, markingScheme: { positive: 4, negative: -1, partial: false } },
+        { name: 'JEE_MAIN', totalQuestions: 90, markingScheme: { positive: 4, negative: -1, partial: false } },
+        { name: 'NEET', totalQuestions: 200, markingScheme: { positive: 4, negative: -1, partial: false } },
         { name: 'JEE_ADVANCED', totalQuestions: 48, markingScheme: { positive: 4, negative: -2, partial: true } }
       ];
 

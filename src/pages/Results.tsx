@@ -85,8 +85,16 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     normalizedStudentAns[normalizeQKey(k)] = String(v || '').trim().toUpperCase();
   });
 
+  // NEET Section B tracking
+  const neetSectionBAttempts: Record<string, number> = { 'Physics': 0, 'Chemistry': 0, 'Botany': 0, 'Zoology': 0, 'Biology': 0 };
+  const jeeMainSectionBAttempts: Record<string, number> = { 'Physics': 0, 'Chemistry': 0, 'Math': 0 };
+
   // Ensure answerKey is an object we can iterate
-  const keyEntries = Object.entries(answerKey || {});
+  const keyEntries = Object.entries(answerKey || {}).sort((a, b) => {
+    const aN = parseInt(a[0].replace(/[^0-9]/g, '')) || 0;
+    const bN = parseInt(b[0].replace(/[^0-9]/g, '')) || 0;
+    return aN - bN;
+  });
   
   keyEntries.forEach(([rawQIdx, qData]: [string, any]) => {
     const qIdx = normalizeQKey(rawQIdx);
@@ -155,6 +163,43 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     const topic = qbgMap[topicId]?.topic || qData.topic || topicId || '';
     const diff = normalizedDifficulty;
 
+    // NEET Section B Logic (First 10 attempted only)
+    let isIgnoredByNeetLimit = false;
+    if (pattern === 'NEET') {
+      const qNum = parseInt(qIdx.replace(/[^0-9]/g, '')) || 0;
+      let neetSub = '';
+      if (qNum >= 36 && qNum <= 50) neetSub = 'Physics';
+      else if (qNum >= 86 && qNum <= 100) neetSub = 'Chemistry';
+      else if (qNum >= 136 && qNum <= 150) neetSub = 'Botany';
+      else if (qNum >= 186 && qNum <= 200) neetSub = 'Zoology';
+
+      if (neetSub && studentAns && studentAns !== '') {
+        if (neetSectionBAttempts[neetSub] >= 10) {
+          isIgnoredByNeetLimit = true;
+        } else {
+          neetSectionBAttempts[neetSub]++;
+        }
+      }
+    }
+
+    // JEE Main Section B Logic (First 5 attempted only)
+    let isIgnoredByJeeLimit = false;
+    if (pattern === 'JEE_MAIN') {
+      const qNum = parseInt(qIdx.replace(/[^0-9]/g, '')) || 0;
+      let jeeSub = '';
+      if (qNum >= 21 && qNum <= 30) jeeSub = 'Physics';
+      else if (qNum >= 51 && qNum <= 60) jeeSub = 'Chemistry';
+      else if (qNum >= 81 && qNum <= 90) jeeSub = 'Math';
+
+      if (jeeSub && studentAns && studentAns !== '') {
+        if (jeeMainSectionBAttempts[jeeSub] >= 5) {
+          isIgnoredByJeeLimit = true;
+        } else {
+          jeeMainSectionBAttempts[jeeSub]++;
+        }
+      }
+    }
+
     if (!chapterStats[chap]) {
       chapterStats[chap] = { total: 0, correct: 0, wrong: 0, score: 0, subject, chapterId };
     }
@@ -177,10 +222,13 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     }
     difficultyStats[diff].total++;
 
-    let status: 'correct' | 'wrong' | 'blank' | 'partial' = 'wrong';
+    let status: 'correct' | 'wrong' | 'blank' | 'partial' | 'ignored' = 'wrong';
     let qScore = 0;
 
-    if (correctAns === 'BONUS') {
+    if (isIgnoredByNeetLimit || isIgnoredByJeeLimit) {
+      status = 'ignored';
+      qScore = 0;
+    } else if (correctAns === 'BONUS') {
       correctCount++;
       qScore = correctPoints;
       status = 'correct';
@@ -289,6 +337,8 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
       subjectStats[subject].score += qScore;
       difficultyStats[diff].blank++;
       difficultyStats[diff].score += qScore;
+    } else if (status === 'ignored') {
+      // Do nothing for ignored Section B questions (already counted in total)
     } else {
       chapterStats[chap].wrong++;
       chapterStats[chap].score += qScore;
@@ -459,12 +509,18 @@ export default function Results() {
       filtered = filtered.filter(r => r.batchId === filters.batchId);
     }
 
-    const sorted = filtered.sort((a, b) => {
+    const sorted = filtered.sort((a: any, b: any) => {
       if (resultsSortConfig) {
         let aVal = a[resultsSortConfig.key];
         let bVal = b[resultsSortConfig.key];
         
-        // Handle nested paths or special keys
+        // Handle nested paths or dynamic subject scores
+        if (resultsSortConfig.key.startsWith('subject_')) {
+          const subName = resultsSortConfig.key.replace('subject_', '');
+          aVal = a.subjectStats?.[subName]?.score || 0;
+          bVal = b.subjectStats?.[subName]?.score || 0;
+        }
+
         if (resultsSortConfig.key === 'physics') aVal = a.subjectStats?.Physics?.score || 0;
         if (resultsSortConfig.key === 'chemistry') aVal = a.subjectStats?.Chemistry?.score || 0;
         if (resultsSortConfig.key === 'math') aVal = a.subjectStats?.Math?.score || a.subjectStats?.Maths?.score || a.subjectStats?.Mathematics?.score || 0;
@@ -489,7 +545,21 @@ export default function Results() {
     }
     
     return ranked;
-  }, [results, filters, selectedTestIds]);
+  }, [results, filters, selectedTestIds, resultsSortConfig]);
+
+  const allAvailableSubjects = useMemo(() => {
+    const subjects = new Set<string>();
+    results.forEach(res => {
+      if (res.subjectStats) {
+        if (Array.isArray(res.subjectStats)) {
+          res.subjectStats.forEach((s: any) => { if (s.name) subjects.add(s.name); });
+        } else {
+          Object.keys(res.subjectStats).forEach(sName => subjects.add(sName));
+        }
+      }
+    });
+    return Array.from(subjects).sort();
+  }, [results]);
   const [masters, setMasters] = useState<any>({
     programs: [],
     centers: [],
@@ -578,75 +648,82 @@ export default function Results() {
       const progMapDetails = progSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
 
       // 2. Process rows
-      const resultsBatch = writeBatch(db);
       let count = 0;
+      const chunks = [];
+      const CHUNK_SIZE = 450; // Leave room for other operations
       
-      for (const row of jsonData) {
-        const regNoRaw = row.regNo || row.registrationNo || row.rollNo || row.ID || row['Reg No'] || '';
-        const regNo = String(regNoRaw).trim().toUpperCase();
-        if (!regNo) continue;
-
-        const student = studentMaster.find((s: any) => String(s.regNo).toUpperCase() === regNo);
-        const existingResult = existingResultsMap[regNo];
-        
-        let newAnswers: Record<string, string> = {};
-        Object.keys(row).forEach(key => {
-          const lowerKey = key.toLowerCase().replace(/\s/g, '');
-          const normalizedKey = key.replace(/[^0-9]/g, '');
-          const isMetadata = ['regno', 'registrationno', 'rollno', 'id', 'name', 'studentname', 'phone', 'email', 'testmode', 'isabsent'].includes(lowerKey);
-          
-          if (normalizedKey && !isNaN(parseInt(normalizedKey)) && !isMetadata) {
-            // If paperName is provided, prefix the question number
-            const qKey = paperName ? `${paperName}-${normalizedKey}` : normalizedKey;
-            newAnswers[qKey] = String(row[key] || '').trim().toUpperCase();
-          }
-        });
-
-        // Merge with existing answers if any
-        const mergedAnswers = {
-          ...(existingResult?.responsesJson || {}),
-          ...newAnswers
-        };
-
-        const stats = evaluateResult(mergedAnswers, test.answerKey || {}, qbgMap, test.pattern);
-        
-        const centerId = student?.centerId || existingResult?.centerId || '';
-        const batchId = student?.batchId || existingResult?.batchId || '';
-        const programId = student?.programId || existingResult?.programId || '';
-
-        const payload = {
-          testId: targetTestId,
-          testName: test.name || 'Unknown',
-          testDate: test.date || '',
-          regNo: regNo,
-          studentName: student?.name || row.studentName || row.name || existingResult?.studentName || 'Unknown Student',
-          testMode: row.testMode?.toLowerCase() === 'online' ? 'online' : (student?.testMode || 'offline'),
-          centerId: centerId,
-          centerName: centerId && centerMapDetails[centerId] ? (centerMapDetails[centerId].centerName || '') : (existingResult?.centerName || ''),
-          batchId: batchId,
-          batchName: batchId && batchMapDetails[batchId] ? (batchMapDetails[batchId].batchName || '') : (existingResult?.batchName || ''),
-          batchCode: student?.batchCode || existingResult?.batchCode || '',
-          programId: programId,
-          programName: programId && progMapDetails[programId] ? (progMapDetails[programId].programName || '') : (existingResult?.programName || ''),
-          phone: student?.phone || row.phone || existingResult?.phone || '',
-          email: student?.email || row.email || existingResult?.email || '',
-          ...stats,
-          isAbsent: row.isAbsent === true || row.isAbsent === 'TRUE' || row.isAbsent === 'Yes',
-          responsesJson: mergedAnswers,
-          evaluatedAt: serverTimestamp(),
-          answerKeyVersion: test.answerKeyVersion || 1
-        };
-
-        if (existingResult) {
-          resultsBatch.update(doc(db, 'result_updated', existingResult.id), payload);
-        } else {
-          const newRef = doc(collection(db, 'result_updated'));
-          resultsBatch.set(newRef, payload);
-        }
-        count++;
+      for (let i = 0; i < jsonData.length; i += CHUNK_SIZE) {
+        chunks.push(jsonData.slice(i, i + CHUNK_SIZE));
       }
 
-      await resultsBatch.commit();
+      for (const chunk of chunks) {
+        const resultsBatch = writeBatch(db);
+        
+        for (const row of chunk) {
+          const regNoRaw = row.regNo || row.registrationNo || row.rollNo || row.ID || row['Reg No'] || row.RollNum || row.EnrollmentNo || '';
+          const regNo = String(regNoRaw).trim().toUpperCase();
+          if (!regNo) continue;
+
+          const student = studentMaster.find((s: any) => String(s.regNo).toUpperCase() === regNo);
+          const existingResult = existingResultsMap[regNo];
+          
+          let newAnswers: Record<string, string> = {};
+          Object.keys(row).forEach(key => {
+            const lowerKey = key.toLowerCase().replace(/\s/g, '');
+            const normalizedKey = key.replace(/[^0-9]/g, '');
+            const isMetadata = ['regno', 'registrationno', 'rollno', 'id', 'name', 'studentname', 'phone', 'email', 'testmode', 'isabsent', 'rollnum', 'enrollmentno'].includes(lowerKey);
+            
+            if (normalizedKey && !isNaN(parseInt(normalizedKey)) && !isMetadata) {
+              const qKey = paperName ? `${paperName}-${normalizedKey}` : normalizedKey;
+              newAnswers[qKey] = String(row[key] || '').trim().toUpperCase();
+            }
+          });
+
+          const mergedAnswers = {
+            ...(existingResult?.responsesJson || {}),
+            ...newAnswers
+          };
+
+          const stats = evaluateResult(mergedAnswers, test.answerKey || {}, qbgMap, test.pattern);
+          
+          const centerId = student?.centerId || existingResult?.centerId || '';
+          const batchId = student?.batchId || existingResult?.batchId || '';
+          const programId = student?.programId || existingResult?.programId || '';
+
+          const payload = {
+            testId: targetTestId,
+            testName: test.name || 'Unknown',
+            testDate: test.date || '',
+            regNo: regNo,
+            studentName: student?.name || row.studentName || row.name || existingResult?.studentName || 'Unknown Student',
+            testMode: row.testMode?.toLowerCase() === 'online' ? 'online' : (student?.testMode || 'offline'),
+            centerId: centerId,
+            centerName: centerId && centerMapDetails[centerId] ? (centerMapDetails[centerId].centerName || '') : (existingResult?.centerName || ''),
+            batchId: batchId,
+            batchName: batchId && batchMapDetails[batchId] ? (batchMapDetails[batchId].batchName || '') : (existingResult?.batchName || ''),
+            batchCode: student?.batchCode || existingResult?.batchCode || '',
+            programId: programId,
+            programName: programId && progMapDetails[programId] ? (progMapDetails[programId].programName || '') : (existingResult?.programName || ''),
+            phone: student?.phone || row.phone || existingResult?.phone || '',
+            email: student?.email || row.email || existingResult?.email || '',
+            ...stats,
+            isAbsent: row.isAbsent === true || row.isAbsent === 'TRUE' || row.isAbsent === 'Yes' || row.isAbsent === 'absent',
+            responsesJson: mergedAnswers,
+            evaluatedAt: serverTimestamp(),
+            answerKeyVersion: test.answerKeyVersion || 1
+          };
+
+          if (existingResult) {
+            resultsBatch.update(doc(db, 'result_updated', existingResult.id), payload);
+          } else {
+            const newRef = doc(collection(db, 'result_updated'));
+            resultsBatch.set(newRef, payload);
+          }
+          count++;
+        }
+        await resultsBatch.commit();
+      }
+
       toast.success(`Successfully processed ${count} student results!`, { id: toastId });
       setIsBulkUploadOpen(false);
       setSelectedPaper('');
@@ -681,8 +758,9 @@ export default function Results() {
       const centerMap = centSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
       const progMap = progSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
 
-      const batch = writeBatch(db);
       let updateCount = 0;
+      let currentBatch = writeBatch(db);
+      let opCount = 0;
 
       for (const resDoc of resultsSnap.docs) {
         const resData = resDoc.data();
@@ -708,14 +786,24 @@ export default function Results() {
           if (student.batchCode && !resData.batchCode) updates.batchCode = student.batchCode;
 
           if (Object.keys(updates).length > 0) {
-            batch.update(resDoc.ref, { ...updates, metadataSyncedAt: serverTimestamp() });
+            currentBatch.update(resDoc.ref, { ...updates, metadataSyncedAt: serverTimestamp() });
             updateCount++;
+            opCount++;
+
+            if (opCount >= 450) {
+              await currentBatch.commit();
+              currentBatch = writeBatch(db);
+              opCount = 0;
+            }
           }
         }
       }
 
+      if (opCount > 0) {
+        await currentBatch.commit();
+      }
+
       if (updateCount > 0) {
-        await batch.commit();
         toast.success(`Synced metadata for ${updateCount} results!`, { id: toastId });
         fetchResults(selectedTestIds);
       } else {
@@ -1204,33 +1292,18 @@ export default function Results() {
                   >
                     Total Score {resultsSortConfig?.key === 'score' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'physics' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'physics', direction: dir });
-                    }}
-                  >
-                    Physics Score {resultsSortConfig?.key === 'physics' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'chemistry' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'chemistry', direction: dir });
-                    }}
-                  >
-                    Chemistry {resultsSortConfig?.key === 'chemistry' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'math' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'math', direction: dir });
-                    }}
-                  >
-                    Maths {resultsSortConfig?.key === 'math' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
+                  {allAvailableSubjects.map(sub => (
+                    <th 
+                      key={sub}
+                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      onClick={() => {
+                        const dir = resultsSortConfig?.key === `subject_${sub}` && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
+                        setResultsSortConfig({ key: `subject_${sub}`, direction: dir });
+                      }}
+                    >
+                      {sub} {resultsSortConfig?.key === `subject_${sub}` && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
+                    </th>
+                  ))}
                   <th 
                     className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
@@ -1286,15 +1359,11 @@ export default function Results() {
                       <td className="px-6 py-5 text-center bg-blue-50/10">
                         <span className="text-xl font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
                       </td>
-                      <td className="px-6 py-5 text-center">
-                        <span className="text-sm font-black text-amber-600">{res.isAbsent ? '—' : pScore}</span>
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <span className="text-sm font-black text-indigo-600">{res.isAbsent ? '—' : cScore}</span>
-                      </td>
-                      <td className="px-6 py-5 text-center">
-                        <span className="text-sm font-black text-emerald-600">{res.isAbsent ? '—' : mScore}</span>
-                      </td>
+                      {allAvailableSubjects.map(sub => (
+                        <td key={sub} className="px-6 py-5 text-center">
+                          <span className="text-sm font-black text-indigo-600">{res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score || 0)}</span>
+                        </td>
+                      ))}
                       <td className="px-6 py-5 text-center">
                         <Badge variant={res.accuracy > 70 ? 'green' : 'blue'} className="text-[9px]">
                           {res.isAbsent ? '—' : `${Math.round(res.accuracy)}%`}
@@ -1427,9 +1496,9 @@ export default function Results() {
                     className="rounded-2xl border-slate-100 font-bold"
                   >
                     <option value="all">All Subjects</option>
-                    <option value="Physics">Physics</option>
-                    <option value="Chemistry">Chemistry</option>
-                    <option value="Math">Math</option>
+                    {allAvailableSubjects.map(sub => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
                   </Select>
                 </div>
                 <div className="space-y-2">

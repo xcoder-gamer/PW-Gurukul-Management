@@ -89,13 +89,14 @@ export default function More() {
       // 1. Programs
       const programRefs: any[] = [];
       const programs = [
+        { programName: 'JEE Main', programDescription: 'Standard engineering entrance' },
         { programName: 'JEE Advanced', programDescription: 'Target IIT 2025' },
         { programName: 'NEET UG', programDescription: 'Medical entrance focus' },
         { programName: 'Foundation (IX-X)', programDescription: 'Early conceptual building' }
       ];
       
       for (const p of programs) {
-        const ref = await addDoc(collection(db, 'programs'), { ...p, createdAt: Timestamp.now() });
+        const ref = await addDoc(collection(db, 'programs'), { ...p, createdAt: Timestamp.now(), isActive: true });
         programRefs.push({ id: ref.id, ...p });
       }
 
@@ -109,7 +110,7 @@ export default function More() {
       ];
       
       for (const c of centers) {
-        const ref = await addDoc(collection(db, 'centers'), { ...c, createdAt: Timestamp.now() });
+        const ref = await addDoc(collection(db, 'centers'), { ...c, createdAt: Timestamp.now(), isActive: true });
         centerRefs.push({ id: ref.id, ...c });
       }
 
@@ -135,7 +136,8 @@ export default function More() {
       const teachersData = [
         { name: 'Dr. R.K. Verma', subject: 'Physics', email: 'rk.verma@example.com' },
         { name: 'Prof. S. Gupta', subject: 'Chemistry', email: 's.gupta@example.com' },
-        { name: 'Amit Sharma', subject: 'Mathematics', email: 'amit.maths@example.com' }
+        { name: 'Amit Sharma', subject: 'Mathematics', email: 'amit.maths@example.com' },
+        { name: 'Dr. Neha Jha', subject: 'Biology', email: 'neha.biology@example.com' }
       ];
       for (const t of teachersData) {
         await addDoc(collection(db, 'teachers'), {
@@ -150,7 +152,9 @@ export default function More() {
       const subjects = [
         { subject: 'Physics', chapters: ['Kinematics', 'Electromagnetism', 'Optics'] },
         { subject: 'Chemistry', chapters: ['Organic Synthesis', 'Thermodynamics', 'Atomic Structure'] },
-        { subject: 'Mathematics', chapters: ['Calculus', 'Complex Numbers', 'Coordinate Geometry'] }
+        { subject: 'Mathematics', chapters: ['Calculus', 'Complex Numbers', 'Coordinate Geometry'] },
+        { subject: 'Botany', chapters: ['Plant Cell', 'Genetics', 'Photosynthesis'] },
+        { subject: 'Zoology', chapters: ['Animal Kingdom', 'Human Anatomy', 'Evolution'] }
       ];
       const qbgEntries: any[] = [];
       for (const sub of subjects) {
