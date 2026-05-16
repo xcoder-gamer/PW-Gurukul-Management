@@ -230,16 +230,17 @@ export default function Tests() {
           const key: any = {};
           let maxQ = 0;
           rawData.forEach((row: any) => {
-            const qNumRaw = row.Question || row.No || row.qNo || row.id || row.number || row.qIdx || '';
-            const qNum = String(qNumRaw).replace(/[^\d]/g, '');
-            let ans = String(row.Answer || row.Key || row.ans || '').trim();
+            const qNumRaw = row.Question || row.No || row.qNo || row.id || row.number || row.qIdx || row.qno || row.QNo || '';
+            const qNum = String(qNumRaw).trim().replace(/[^\d]/g, '');
+            let ansRaw = row.Answer ?? row.Key ?? row.ans ?? row.answer ?? row['Correct Answer'] ?? row['correct answer'] ?? row.correctAns ?? '';
+            let ans = String(ansRaw).trim();
             
             // Clean JEE Advanced style answers like (A, C) or (8.89 to 8.90)
             if (ans.startsWith('(') && ans.endsWith(')')) {
               ans = ans.slice(1, -1).trim();
             }
 
-            if (qNum && ans) {
+            if (qNum && (ans !== '' || ansRaw === 0)) {
               const qStr = String(qNum);
               const qInt = parseInt(qStr);
               if (!isNaN(qInt) && qInt > maxQ) maxQ = qInt;
@@ -262,8 +263,8 @@ export default function Tests() {
               
               const defaultPos = 4;
               const defaultNeg = (type === 'Numerical' || type === 'Integer') ? ((formData.pattern === 'JEE_MAIN' || formData.pattern === 'NEET') ? -1 : 0) : -1;
-              const pos = parseFloat(row.Positive || row.positive || row['correct answer'] || row.correct || defaultPos);
-              let neg = parseFloat(row.Negative || row.negative || row['wrong answer'] || row.wrong || defaultNeg);
+              const pos = parseFloat(row.Positive || row.positive || row.Marks || row.marks || row.correct || defaultPos);
+              let neg = parseFloat(row.Negative || row.negative || row['Negative Marks'] || row.wrong || defaultNeg);
               
               // STRICT OVERRIDE for Numerical questions in JEE patterns
               if ((type === 'Numerical' || type === 'Integer') && formData.pattern === 'JEE_ADVANCED') {

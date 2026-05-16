@@ -85,10 +85,6 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     normalizedStudentAns[normalizeQKey(k)] = String(v || '').trim().toUpperCase();
   });
 
-  // NEET Section B tracking
-  const neetSectionBAttempts: Record<string, number> = { 'Physics': 0, 'Chemistry': 0, 'Botany': 0, 'Zoology': 0, 'Biology': 0 };
-  const jeeMainSectionBAttempts: Record<string, number> = { 'Physics': 0, 'Chemistry': 0, 'Math': 0 };
-
   // Ensure answerKey is an object we can iterate
   const keyEntries = Object.entries(answerKey || {}).sort((a, b) => {
     const aN = parseInt(a[0].replace(/[^0-9]/g, '')) || 0;
@@ -117,8 +113,11 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     const fallbackCorrect = 4;
     const fallbackWrong = (pattern === 'JEE_ADVANCED' && !isNumerical) ? -2 : (pattern === 'JEE_ADVANCED' && isNumerical) ? 0 : -1;
 
-    const correctPoints = parseFloat(String(weights.correct ?? weights.positive ?? fallbackCorrect));
+    let correctPoints = parseFloat(String(weights.correct ?? weights.positive ?? fallbackCorrect));
+    if (isNaN(correctPoints)) correctPoints = fallbackCorrect;
+    
     let wrongPoints = parseFloat(String(weights.wrong ?? weights.negative ?? fallbackWrong));
+    if (isNaN(wrongPoints)) wrongPoints = fallbackWrong;
 
     // STRICT OVERRIDE for Numerical questions in JEE patterns
     // JEE Advanced standardly has 0 negative marks for Numerical/Integer questions
@@ -163,43 +162,6 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     const topic = qbgMap[topicId]?.topic || qData.topic || topicId || '';
     const diff = normalizedDifficulty;
 
-    // NEET Section B Logic (First 10 attempted only)
-    let isIgnoredByNeetLimit = false;
-    if (pattern === 'NEET') {
-      const qNum = parseInt(qIdx.replace(/[^0-9]/g, '')) || 0;
-      let neetSub = '';
-      if (qNum >= 36 && qNum <= 50) neetSub = 'Physics';
-      else if (qNum >= 86 && qNum <= 100) neetSub = 'Chemistry';
-      else if (qNum >= 136 && qNum <= 150) neetSub = 'Botany';
-      else if (qNum >= 186 && qNum <= 200) neetSub = 'Zoology';
-
-      if (neetSub && studentAns && studentAns !== '') {
-        if (neetSectionBAttempts[neetSub] >= 10) {
-          isIgnoredByNeetLimit = true;
-        } else {
-          neetSectionBAttempts[neetSub]++;
-        }
-      }
-    }
-
-    // JEE Main Section B Logic (First 5 attempted only)
-    let isIgnoredByJeeLimit = false;
-    if (pattern === 'JEE_MAIN') {
-      const qNum = parseInt(qIdx.replace(/[^0-9]/g, '')) || 0;
-      let jeeSub = '';
-      if (qNum >= 21 && qNum <= 30) jeeSub = 'Physics';
-      else if (qNum >= 51 && qNum <= 60) jeeSub = 'Chemistry';
-      else if (qNum >= 81 && qNum <= 90) jeeSub = 'Math';
-
-      if (jeeSub && studentAns && studentAns !== '') {
-        if (jeeMainSectionBAttempts[jeeSub] >= 5) {
-          isIgnoredByJeeLimit = true;
-        } else {
-          jeeMainSectionBAttempts[jeeSub]++;
-        }
-      }
-    }
-
     if (!chapterStats[chap]) {
       chapterStats[chap] = { total: 0, correct: 0, wrong: 0, score: 0, subject, chapterId };
     }
@@ -222,13 +184,10 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     }
     difficultyStats[diff].total++;
 
-    let status: 'correct' | 'wrong' | 'blank' | 'partial' | 'ignored' = 'wrong';
+    let status: 'correct' | 'wrong' | 'blank' | 'partial' = 'wrong';
     let qScore = 0;
 
-    if (isIgnoredByNeetLimit || isIgnoredByJeeLimit) {
-      status = 'ignored';
-      qScore = 0;
-    } else if (correctAns === 'BONUS') {
+    if (correctAns === 'BONUS') {
       correctCount++;
       qScore = correctPoints;
       status = 'correct';
@@ -337,8 +296,6 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
       subjectStats[subject].score += qScore;
       difficultyStats[diff].blank++;
       difficultyStats[diff].score += qScore;
-    } else if (status === 'ignored') {
-      // Do nothing for ignored Section B questions (already counted in total)
     } else {
       chapterStats[chap].wrong++;
       chapterStats[chap].score += qScore;
@@ -675,7 +632,8 @@ export default function Results() {
             
             if (normalizedKey && !isNaN(parseInt(normalizedKey)) && !isMetadata) {
               const qKey = paperName ? `${paperName}-${normalizedKey}` : normalizedKey;
-              newAnswers[qKey] = String(row[key] || '').trim().toUpperCase();
+              const val = row[key];
+              newAnswers[qKey] = (val !== null && val !== undefined) ? String(val).trim().toUpperCase() : '';
             }
           });
 
@@ -3979,7 +3937,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                               </div>
                               
                               {/* Tooltip for Correct Answer */}
-                              <div className="absolute top-full mt-1 bg-slate-900 text-white text-[8px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity z-20 pointer-events-none whitespace-nowrap">
+                              <div className="absolute top-full mt-1 bg-slate-900 text-white text-[8px] font-bold py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity z-20 pointer-events-none whitespace-nowrap shadow-xl">
                                 Correct: {ev.correctAns}
                               </div>
                             </div>
@@ -4014,6 +3972,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                      <p className="text-[10px] font-medium text-slate-400">Question was skipped or not reached.</p>
                    </div>
                 </div>
+
                 <div className="flex items-start gap-3">
                    <div className="w-4 h-4 rounded-full bg-blue-500 shrink-0 mt-0.5" />
                    <div>
