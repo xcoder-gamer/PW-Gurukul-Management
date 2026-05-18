@@ -429,8 +429,11 @@ export default function Results() {
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
       filtered = filtered.filter(r => 
-        (r.studentName || '').toLowerCase().includes(search) || 
-        (r.regNo || '').toLowerCase().includes(search)
+        String(r.studentName || '').toLowerCase().includes(search) || 
+        String(r.regNo || '').toLowerCase().includes(search) ||
+        String(r.centerName || '').toLowerCase().includes(search) ||
+        String(r.batchName || '').toLowerCase().includes(search) ||
+        String(r.batchCode || '').toLowerCase().includes(search)
       );
     }
 
@@ -509,7 +512,7 @@ export default function Results() {
     }
     
     return ranked;
-  }, [results, filters, selectedTestIds, resultsSortConfig]);
+  }, [results, filters, selectedTestIds, resultsSortConfig, searchTerm]);
 
   const allAvailableSubjects = useMemo(() => {
     const subjects = new Set<string>();
@@ -1000,6 +1003,7 @@ export default function Results() {
         tests={tests} 
         onBack={() => setView('table')} 
         selectedTestIds={selectedTestIds}
+        initialSearch={searchTerm}
         onTestToggle={handleTestToggle}
         onSelectAllTests={(allIds) => {
           setSelectedTestIds(allIds);
@@ -2051,11 +2055,12 @@ export default function Results() {
   );
 }
 
-function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle, onSelectAllTests }: { 
+function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests }: { 
   results: any[], 
   tests: any[], 
   onBack: () => void,
   selectedTestIds: string[],
+  initialSearch?: string,
   onTestToggle?: (id: string) => void,
   onSelectAllTests?: (ids: string[]) => void
 }) {
@@ -2065,8 +2070,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [selectedTestModes, setSelectedTestModes] = useState<string[]>([]);
-  const [studentSearch, setStudentSearch] = useState('');
+  const [studentSearch, setStudentSearch] = useState(initialSearch);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]); // Array of sKeys (regNo_name)
+
+  useEffect(() => {
+    if (initialSearch) {
+      setStudentSearch(initialSearch);
+    }
+  }, [initialSearch]);
   const [studentSearchFocused, setStudentSearchFocused] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['correct', 'incorrect', 'unattempted', 'accuracy']);
@@ -2123,15 +2134,47 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
     const topicTable: any = {};
 
     const studentAggregates: Record<string, any> = {};
+    const allStudentsMap: Record<string, any> = {};
     
     results.forEach(res => {
       // Apply Test Filter
       if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
       
-      // Apply Test Mode Filter
+      const sKey = `${res.regNo || 'NOREG'}_${res.studentName}`;
+      
+      // Collect for "All Students" list (dropdown/suggestions) - regardless of mode or search
+      if (!allStudentsMap[sKey]) {
+        allStudentsMap[sKey] = {
+          regNo: res.regNo || '—',
+          studentName: res.studentName,
+          centerName: res.centerName || '—',
+          batchName: res.batchName || '—',
+          batchCode: res.batchCode || '—',
+          sKey: sKey
+        };
+      } else {
+        if (res.centerName && res.centerName !== '—') allStudentsMap[sKey].centerName = res.centerName;
+        if (res.batchName && res.batchName !== '—') allStudentsMap[sKey].batchName = res.batchName;
+        if (res.batchCode) allStudentsMap[sKey].batchCode = res.batchCode;
+      }
+
+      // Apply Test Mode Filter for aggregate analysis
       if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
       
-      const sKey = `${res.regNo || 'NOREG'}_${res.studentName}`;
+      // Multi-student selection filter
+      if (selectedStudents.length > 0 && !selectedStudents.includes(sKey)) return;
+
+      // Apply Student Search Filter (fuzzy)
+      if (studentSearch && selectedStudents.length === 0) {
+        const search = studentSearch.toLowerCase();
+        const matchesName = String(res.studentName || '').toLowerCase().includes(search);
+        const matchesRegNo = String(res.regNo || '').toLowerCase().includes(search);
+        const matchesCenter = String(res.centerName || '').toLowerCase().includes(search);
+        const matchesBatch = String(res.batchName || '').toLowerCase().includes(search) || String(res.batchCode || '').toLowerCase().includes(search);
+        
+        if (!matchesName && !matchesRegNo && !matchesCenter && !matchesBatch) return;
+      }
+
       if (!studentAggregates[sKey]) {
         studentAggregates[sKey] = {
           regNo: res.regNo || '—',
@@ -2160,17 +2203,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
       if (res.centerName && res.centerName !== '—') studentAggregates[sKey].centerName = res.centerName;
       if (res.batchName && res.batchName !== '—') studentAggregates[sKey].batchName = res.batchName;
       if (res.batchCode) studentAggregates[sKey].batchCode = res.batchCode;
-
-      // Multi-student selection filter
-      if (selectedStudents.length > 0 && !selectedStudents.includes(sKey)) return;
-
-      // Apply Student Search Filter (legacy fuzzy)
-      if (studentSearch && selectedStudents.length === 0) {
-        const search = studentSearch.toLowerCase();
-        const matchesName = (res.studentName || '').toLowerCase().includes(search);
-        const matchesRegNo = (res.regNo || '').toLowerCase().includes(search);
-        if (!matchesName && !matchesRegNo) return;
-      }
 
       // Per Student Mapped Evaluation
       const evaluations = res.mappedEvaluation || [];
@@ -2289,7 +2321,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
     }));
 
     // For the suggestion list, we want all students regardless of selectedStudents filter
-    const allStudentsList = [...studentTableList];
+    const allStudentsList = Object.values(allStudentsMap);
 
     if (studentSortConfig) {
       studentTableList.sort((a: any, b: any) => {
@@ -2314,7 +2346,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
       studentTable: studentTableList,
       allStudents: allStudentsList 
     };
-  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig]);
+  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig]);
 
   // Derived filter options
   const filterOptions = useMemo(() => {
@@ -2487,7 +2519,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, onTestToggle
                         ?.filter((s: any) => {
                           if (selectedStudents.includes(s.sKey)) return false;
                           const search = studentSearch.toLowerCase();
-                          return s.studentName.toLowerCase().includes(search) || (s.regNo || '').toLowerCase().includes(search);
+                          return String(s.studentName || '').toLowerCase().includes(search) || 
+                                 String(s.regNo || '').toLowerCase().includes(search) ||
+                                 String(s.centerName || '').toLowerCase().includes(search) ||
+                                 String(s.batchName || '').toLowerCase().includes(search) ||
+                                 String(s.batchCode || '').toLowerCase().includes(search);
                         })
                         .slice(0, 10)
                         .map((s: any) => (
