@@ -70,13 +70,16 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 
   // Helper to normalize keys (e.g., "Q.1", "Q1", "1" -> "1")
   const normalizeQKey = (key: string) => {
+    if (!key) return '';
     // If it's a paper-prefixed key (e.g., "Paper 1-1"), preserve the prefix but normalize the number
     if (key.includes('-')) {
       const parts = key.split('-');
-      const num = parts.pop()?.replace(/[^0-9]/g, '') || '';
-      return `${parts.join('-')}-${num}`;
+      const numPart = parts.pop()?.replace(/[^0-9]/g, '') || '';
+      const num = numPart ? String(parseInt(numPart)) : '';
+      return num ? `${parts.join('-')}-${num}` : parts.join('-');
     }
-    return key.replace(/[^0-9]/g, '');
+    const digits = key.replace(/[^0-9]/g, '');
+    return digits ? String(parseInt(digits)) : '';
   };
   
   // Normalize all student answer keys for easier lookup
@@ -187,6 +190,28 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     let status: 'correct' | 'wrong' | 'blank' | 'partial' = 'wrong';
     let qScore = 0;
 
+    // Helper to check if student answer matches any of the allowed options
+    const isMatched = (sVal: string, cVal: string, isNumeric: boolean = false) => {
+      const s = sVal.trim().toUpperCase();
+      const c = cVal.trim().toUpperCase();
+      if (s === c) return true;
+      
+      // Handle multiple options like "A OR B", "1/2", "A | B"
+      const options = c.split(/[\/|]|\sOR\s/i).map(o => o.trim()).filter(o => o !== '');
+      if (options.length > 1) {
+        return options.some(opt => {
+          if (s === opt) return true;
+          if (isNumeric || !isNaN(parseFloat(s.replace(/[^0-9.-]/g, ''))) || !isNaN(parseFloat(opt.replace(/[^0-9.-]/g, '')))) {
+            const sNum = parseFloat(s.replace(/[^0-9.-]/g, ''));
+            const optNum = parseFloat(opt.replace(/[^0-9.-]/g, ''));
+            if (!isNaN(sNum) && !isNaN(optNum) && Math.abs(sNum - optNum) < 0.0001) return true;
+          }
+          return false;
+        });
+      }
+      return false;
+    };
+
     if (correctAns === 'BONUS') {
       correctCount++;
       qScore = correctPoints;
@@ -195,27 +220,9 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
       qScore = unattemptPoints;
       blankCount++;
       status = 'blank';
-    } else if (qData.type === 'Numerical' || qData.Type === 'Numerical' || (!isNaN(parseFloat(String(studentAns))) && !isNaN(parseFloat(String(correctAns))))) {
-      // Normalize both values: trim, parse as float, and handle scientific notation or multiple dots
-      const sValStr = String(studentAns).trim().replace(/[^0-9.-]/g, '');
-      const cValStr = String(correctAns).trim().replace(/[^0-9.-]/g, '');
-      
-      const sVal = parseFloat(sValStr);
-      const cVal = parseFloat(cValStr);
-      
-      // Allow for small floating point differences and loose string match
-      if (!isNaN(sVal) && !isNaN(cVal)) {
-        // Round to 6 decimal places to avoid floating point precision issues
-        if (Math.abs(sVal - cVal) < 0.0001) {
-          correctCount++;
-          qScore = correctPoints;
-          status = 'correct';
-        } else {
-          wrongCount++;
-          qScore = wrongPoints;
-          status = 'wrong';
-        }
-      } else if (String(studentAns).trim().toUpperCase() === String(correctAns).trim().toUpperCase()) {
+    } else if (qData.type === 'Numerical' || qData.Type === 'Numerical' || (!isNaN(parseFloat(String(studentAns))) && !isNaN(parseFloat(String(correctAns)))) || correctAns.includes('OR') || correctAns.includes('/') || correctAns.includes('|')) {
+      // Numerical or Multi-option single choice
+      if (isMatched(studentAns, correctAns, true)) {
         correctCount++;
         qScore = correctPoints;
         status = 'correct';
@@ -266,7 +273,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
         qScore = wrongPoints;
         status = 'wrong';
       }
-    } else if (studentAns.trim().toUpperCase() === String(correctAns).trim().toUpperCase()) {
+    } else if (isMatched(studentAns, correctAns)) {
       correctCount++;
       qScore = correctPoints;
       status = 'correct';
@@ -357,7 +364,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 export default function Results() {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-  const canEdit = role === 'admin' || role === 'operator';
+  const canEdit = role === 'admin' || role === 'operator' || role === 'central_team';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
   const [isReevaluating, setIsReevaluating] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -631,7 +638,8 @@ export default function Results() {
             const isMetadata = ['regno', 'registrationno', 'rollno', 'id', 'name', 'studentname', 'phone', 'email', 'testmode', 'isabsent', 'rollnum', 'enrollmentno'].includes(lowerKey);
             
             if (normalizedKey && !isNaN(parseInt(normalizedKey)) && !isMetadata) {
-              const qKey = paperName ? `${paperName}-${normalizedKey}` : normalizedKey;
+              const qInt = parseInt(normalizedKey);
+              const qKey = paperName ? `${paperName}-${qInt}` : String(qInt);
               const val = row[key];
               newAnswers[qKey] = (val !== null && val !== undefined) ? String(val).trim().toUpperCase() : '';
             }
@@ -1343,7 +1351,7 @@ export default function Results() {
                       <td className="px-6 py-5 text-center text-sm font-black text-rose-500">{res.isAbsent ? '—' : (res.wrong || 0)}</td>
                       <td className="px-6 py-5 text-center text-sm font-black text-slate-300">{res.isAbsent ? '—' : (res.blank || 0)}</td>
                       {isAdmin && (
-                        <td className="px-6 py-5 text-right">
+                        <td className="px-6 py-5 text-right flex items-center justify-end gap-2">
                           <Button 
                             variant="ghost" 
                             size="sm" 
@@ -1351,6 +1359,25 @@ export default function Results() {
                             className="hover:bg-blue-50 hover:text-blue-600 rounded-xl"
                           >
                             <ChevronRight size={18} strokeWidth={3} />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={async (e) => { 
+                              e.stopPropagation();
+                              if (confirm('Delete this specific result?')) {
+                                try {
+                                  await deleteDoc(doc(db, 'result_updated', res.id));
+                                  toast.success('Result deleted');
+                                  fetchResults(selectedTestIds);
+                                } catch (err) {
+                                  handleFirestoreError(err, OperationType.DELETE, 'result_updated');
+                                }
+                              }
+                            }}
+                            className="hover:bg-rose-50 hover:text-rose-600 rounded-xl"
+                          >
+                            <Trash2 size={16} strokeWidth={3} />
                           </Button>
                         </td>
                       )}

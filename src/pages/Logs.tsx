@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, getDocs, limit, where } from 'firebase/firestore';
+import { collection, query, orderBy, getDocs, limit, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Card, Badge, Input, Select, Loader } from '../components/UI';
 import { motion } from 'framer-motion';
-import { History, Search, Filter, Clock, User, Tag, Info, Plus } from 'lucide-react';
+import { History, Search, Filter, Clock, User, Tag, Info, Plus, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { toast } from 'sonner';
 
 export default function Logs() {
   const [logs, setLogs] = useState<any[]>([]);
@@ -48,6 +49,46 @@ export default function Logs() {
     }
   };
 
+  const handleClearAllLogs = async () => {
+    if (!window.confirm('CRITICAL: This will PERMANENTLY delete ALL audit logs. This action CANNOT be undone. Are you sure?')) return;
+    
+    setLoading(true);
+    try {
+      const snap = await getDocs(collection(db, 'logs'));
+      const chunks = [];
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < snap.docs.length; i += CHUNK_SIZE) {
+        chunks.push(snap.docs.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(d => batch.delete(d.ref));
+        await batch.commit();
+      }
+
+      toast.success('All logs cleared successfully');
+      fetchLogs();
+    } catch (err) {
+       console.error(err);
+       toast.error('Failed to clear logs');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+    if (!window.confirm('Delete this audit log?')) return;
+    try {
+      await deleteDoc(doc(db, 'logs', logId));
+      setLogs(prev => prev.filter(l => l.id !== logId));
+      toast.success('Log entry deleted');
+    } catch (err) {
+       console.error(err);
+       toast.error('Failed to delete log');
+    }
+  };
+
   return (
     <div className="space-y-8 pb-10">
       <header className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
@@ -55,6 +96,15 @@ export default function Logs() {
           <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em]">System Audit</p>
           <h2 className="text-4xl font-black text-slate-900 tracking-tight">Audit Logs</h2>
           <p className="text-slate-400 font-bold text-sm">Track management activity, edits, and system changes.</p>
+        </div>
+        <div className="flex items-center gap-3">
+           <button 
+             onClick={handleClearAllLogs}
+             className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-rose-50 text-rose-600 font-black text-xs uppercase tracking-widest hover:bg-rose-100 transition-colors"
+           >
+              <Trash2 size={16} />
+              Clear Audit Trail
+           </button>
         </div>
       </header>
 
@@ -160,15 +210,24 @@ export default function Logs() {
                     </div>
                   </div>
                   
-                  <div className="flex flex-col md:items-end shrink-0 pl-14 md:pl-0">
-                    <div className="flex items-center gap-2 text-slate-600 font-bold text-xs uppercase tracking-tight">
-                      <User size={12} />
-                      {log.userEmail}
+                  <div className="flex flex-col md:items-end md:justify-center shrink-0 pl-14 md:pl-0 gap-3">
+                    <div className="flex flex-col md:items-end">
+                      <div className="flex items-center gap-2 text-slate-600 font-bold text-xs uppercase tracking-tight">
+                        <User size={12} />
+                        {log.userEmail}
+                      </div>
+                      <div className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-1">
+                        <Clock size={10} />
+                        {log.timestamp ? format(log.timestamp.toDate(), 'PPP p') : 'Just now'}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-1">
-                      <Clock size={10} />
-                      {log.timestamp ? format(log.timestamp.toDate(), 'PPP p') : 'Just now'}
-                    </div>
+                    <button 
+                      onClick={() => handleDeleteLog(log.id)}
+                      className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors md:self-end"
+                      title="Delete log"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               </Card>

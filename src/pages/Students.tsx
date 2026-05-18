@@ -34,8 +34,8 @@ import { useAuth } from '../context/AuthContext';
 
 export default function Students() {
   const { user, role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator';
-  const isViewOnly = role === 'central_team' || role === 'center_level' || role === 'teacher';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isViewOnly = role === 'center_level' || role === 'teacher';
   const canEdit = isAdmin;
   
   const [students, setStudents] = useState<any[]>([]);
@@ -1329,7 +1329,7 @@ function StudentProfile({
                      {isAdmin && (
                        <>
                          <Button variant="secondary" size="sm" onClick={onDelete} className="rounded-2xl w-10 h-10 p-0 bg-red-50 hover:bg-red-100 border-none transition-all">
-                            <X size={18} className="text-red-600" />
+                            <Trash2 size={18} className="text-red-600" />
                          </Button>
                          <Button variant="secondary" size="sm" onClick={onEdit} className="rounded-2xl w-10 h-10 p-0 bg-slate-50">
                             <Edit2 size={18} className="text-blue-600" />

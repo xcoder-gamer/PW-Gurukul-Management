@@ -21,6 +21,7 @@ export default function Patterns() {
     }
   });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     fetchPatterns();
@@ -97,6 +98,32 @@ export default function Patterns() {
     }
   };
 
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Delete ${selectedIds.length} patterns?`)) return;
+    setLoading(true);
+    try {
+      const { writeBatch, doc: fsDoc } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      selectedIds.forEach(id => batch.delete(fsDoc(db, 'testPatterns', id)));
+      await batch.commit();
+      toast.success(`${selectedIds.length} patterns deleted`);
+      setSelectedIds([]);
+      fetchPatterns();
+    } catch (err) {
+      console.error(err);
+      toast.error('Bulk deletion failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-10">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
@@ -124,11 +151,28 @@ export default function Patterns() {
       {view === 'list' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {patterns.map(p => (
-            <Card key={p.id} className="p-8 border-slate-100 hover:shadow-xl hover:shadow-slate-200/50 transition-all group overflow-hidden relative">
+            <Card 
+              key={p.id} 
+              className={cn(
+                "p-8 border-slate-100 hover:shadow-xl hover:shadow-slate-200/50 transition-all group overflow-hidden relative",
+                selectedIds.includes(p.id) ? "border-blue-200 bg-blue-50/10 shadow-lg" : ""
+              )}
+            >
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
-                    {p.name.includes('JEE') ? <Target size={24} /> : <Trophy size={24} />}
+                  <div className="flex items-center gap-4">
+                    <div 
+                      className={cn(
+                        "w-6 h-6 rounded-lg border-2 flex items-center justify-center cursor-pointer transition-all",
+                        selectedIds.includes(p.id) ? "bg-blue-600 border-blue-600" : "border-slate-200 bg-white"
+                      )}
+                      onClick={(e) => toggleSelect(p.id, e)}
+                    >
+                      {selectedIds.includes(p.id) && <Plus size={14} className="text-white rotate-45" />}
+                    </div>
+                    <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
+                      {p.name.includes('JEE') ? <Target size={24} /> : <Trophy size={24} />}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={() => {
@@ -251,6 +295,35 @@ export default function Patterns() {
             </div>
           </div>
         </Card>
+      )}
+
+      {selectedIds.length > 0 && (
+        <motion.div 
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-[2rem] shadow-2xl flex items-center gap-8 z-50 border border-white/10 backdrop-blur-xl"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center font-black">
+              {selectedIds.length}
+            </div>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Selected</p>
+          </div>
+          <div className="w-px h-8 bg-white/10" />
+          <button 
+            onClick={handleBulkDelete}
+            className="flex items-center gap-2 text-rose-400 hover:text-rose-300 transition-colors font-black uppercase tracking-widest text-xs"
+          >
+            <Trash2 size={18} />
+            Bulk Delete
+          </button>
+          <button 
+            onClick={() => setSelectedIds([])}
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <Plus size={20} className="rotate-45" />
+          </button>
+        </motion.div>
       )}
     </div>
   );

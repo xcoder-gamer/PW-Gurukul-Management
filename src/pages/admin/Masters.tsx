@@ -49,6 +49,7 @@ export default function Masters() {
   const [editingItem, setEditingItem] = useState<any | null>(null);
   const [search, setSearch] = useState('');
   const [importing, setImporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // Form states
   const [formData, setFormData] = useState<any>({});
@@ -246,7 +247,7 @@ export default function Masters() {
           count++;
         }
         
-        alert(`Successfully imported ${count} items!`);
+        toast.success(`Successfully imported ${count} items!`);
         
         const categoryMapping: Record<string, LogCategory> = {
           programs: LogCategory.PROGRAM,
@@ -411,6 +412,50 @@ export default function Masters() {
     setShowAddModal(true);
   };
 
+  const toggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredItems.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredItems.map(i => i.id));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`Are you sure you want to PERMANENTLY delete ${selectedIds.length} records? This action cannot be undone.`)) return;
+    
+    setLoading(true);
+    try {
+      const { writeBatch, doc: fsDoc } = await import('firebase/firestore');
+      const chunks = [];
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < selectedIds.length; i += CHUNK_SIZE) {
+        chunks.push(selectedIds.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (const chunk of chunks) {
+        const batch = writeBatch(db);
+        chunk.forEach(id => batch.delete(fsDoc(db, config.collection, id)));
+        await batch.commit();
+      }
+
+      toast.success(`${selectedIds.length} records deleted`);
+      setSelectedIds([]);
+      fetchItems();
+    } catch (err) {
+      console.error(err);
+      toast.error('Bulk deletion failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredItems = items.filter(item => 
     Object.values(item).some(val => 
       String(val).toLowerCase().includes(search.toLowerCase())
@@ -450,9 +495,24 @@ export default function Masters() {
               onChange={e => setSearch(e.target.value)}
             />
           </div>
-          <Button onClick={() => { setEditingItem(null); setFormData({}); setShowAddModal(true); }} className="px-5">
-            <Plus size={20} />
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+                variant="outline"
+                className={cn("px-3 border-slate-100", selectedIds.length === filteredItems.length && filteredItems.length > 0 && "bg-blue-50 border-blue-200")}
+                onClick={toggleSelectAll}
+                title="Select All"
+            >
+                <div className={cn(
+                    "w-5 h-5 rounded border-2 transition-colors flex items-center justify-center",
+                    selectedIds.length === filteredItems.length && filteredItems.length > 0 ? "bg-blue-600 border-blue-600" : "bg-white border-slate-200"
+                )}>
+                    {selectedIds.length === filteredItems.length && filteredItems.length > 0 && <CheckCircle2 size={12} className="text-white" />}
+                </div>
+            </Button>
+            <Button onClick={() => { setEditingItem(null); setFormData({}); setShowAddModal(true); }} className="px-5">
+                <Plus size={20} />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -472,10 +532,27 @@ export default function Masters() {
           filteredItems.map((item) => (
             <Card 
               key={item.id} 
-              className="p-4 flex items-center justify-between group cursor-pointer hover:border-blue-200 active:scale-[0.99] transition-all"
+              className={cn(
+                "p-4 flex items-center group cursor-pointer hover:border-blue-200 active:scale-[0.99] transition-all relative overflow-hidden",
+                selectedIds.includes(item.id) ? "bg-blue-50/50 border-blue-200" : ""
+              )}
               onClick={() => startEdit(item)}
             >
-              <div className="space-y-1">
+              <div 
+                className="mr-4 shrink-0 flex items-center justify-center"
+                onClick={(e) => toggleSelect(item.id, e)}
+              >
+                <div className={cn(
+                    "w-6 h-6 rounded-lg border-2 transition-all flex items-center justify-center shadow-sm",
+                    selectedIds.includes(item.id) 
+                        ? "bg-blue-600 border-blue-600 scale-110" 
+                        : "bg-white border-slate-100 group-hover:border-blue-200"
+                )}>
+                    {selectedIds.includes(item.id) && <CheckCircle2 size={14} className="text-white" />}
+                </div>
+              </div>
+
+              <div className="space-y-1 flex-1">
                 <p className="font-black text-slate-800 break-all">
                   {item.programName || item.centerName || item.batchName || item.teacherName || item.name || item.subject || 'Item'}
                 </p>
@@ -488,7 +565,7 @@ export default function Masters() {
                   {item.examType && <Badge variant="slate">{item.examType}</Badge>}
                 </div>
               </div>
-              <div className="flex space-x-2">
+              <div className="flex space-x-2 shrink-0">
                 <Button 
                   variant="secondary" 
                   size="sm" 
@@ -525,6 +602,41 @@ export default function Masters() {
         )}
       </div>
 
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div 
+            initial={{ y: 50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 50, opacity: 0 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] bg-slate-900 text-white rounded-2xl px-6 py-3 shadow-2xl flex items-center gap-6 border border-white/10 backdrop-blur-md"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center font-black text-xs">
+                {selectedIds.length}
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Selected</p>
+            </div>
+            
+            <div className="h-6 w-px bg-white/10" />
+            
+            <button 
+              onClick={handleBulkDelete}
+              className="flex items-center gap-2 hover:text-red-400 transition-all font-black text-[10px] uppercase tracking-widest px-3 py-1.5 rounded-lg hover:bg-white/5 active:scale-95"
+            >
+              <Trash2 size={14} />
+              Delete All
+            </button>
+
+            <button 
+              onClick={() => setSelectedIds([])}
+              className="p-1 hover:bg-white/10 rounded-full transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Add/Edit Modal */}
       <AnimatePresence>
         {showAddModal && (
@@ -544,9 +656,24 @@ export default function Masters() {
               className="relative w-full max-w-lg bg-white rounded-t-[2.5rem] sm:rounded-[2.5rem] p-8 space-y-6 shadow-2xl overflow-y-auto max-h-[90vh]"
             >
               <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-black text-slate-900">
-                  {editingItem ? 'Edit' : 'Add New'} {type.slice(0, -1)}
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-2xl font-black text-slate-900">
+                    {editingItem ? 'Edit' : 'Add New'} {type.slice(0, -1)}
+                  </h2>
+                  {editingItem && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => {
+                        hardDeleteItem(editingItem.id);
+                        setShowAddModal(false);
+                      }}
+                      className="border-rose-100 text-rose-500 hover:bg-rose-50 h-8 w-8 p-0"
+                    >
+                      <Trash2 size={16} />
+                    </Button>
+                  )}
+                </div>
                 <Button variant="secondary" size="sm" onClick={() => setShowAddModal(false)} className="p-2 h-auto rounded-full bg-slate-50">
                   <X size={20} />
                 </Button>

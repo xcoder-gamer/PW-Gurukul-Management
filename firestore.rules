@@ -22,12 +22,12 @@ service cloud.firestore {
     function getUserData() {
       let emailLower = request.auth.token.email.lower();
       let emailPath = /databases/$(database)/documents/user_roles/$(emailLower);
-      return get(emailPath).data;
+      return exists(emailPath) ? get(emailPath).data : null;
     }
 
     function getRole() {
       let data = getUserData();
-      return data != null ? data.role.lower() : 'guest';
+      return data != null ? data.get('role', 'guest').lower() : 'guest';
     }
 
     function isAdmin() {
@@ -50,6 +50,10 @@ service cloud.firestore {
 
     function isOperator() {
       return isSignedIn() && getRole() == 'operator';
+    }
+
+    function canDelete() {
+      return isAdmin() || isOperator() || isCentralTeam();
     }
 
     function getUserCenterId() {
@@ -124,7 +128,7 @@ service cloud.firestore {
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), batchId));
       allow create: if (isAdmin() || isOperator()) && isValidId(batchId) && isValidBatch(incoming());
       allow update: if (isAdmin() || isOperator()) && isValidBatch(incoming());
-      allow delete: if isAdmin();
+      allow delete: if canDelete();
     }
 
     match /students/{studentId} {
@@ -133,14 +137,14 @@ service cloud.firestore {
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), resource.data.batchId));
       allow create: if (isAdmin() || isOperator()) && isValidId(studentId) && isValidStudent(incoming());
       allow update: if (isAdmin() || isOperator()) && isValidStudent(incoming());
-      allow delete: if isAdmin();
+      allow delete: if canDelete();
     }
 
     match /tests/{testId} {
         allow read: if isAdmin() || isCentralTeam() || isCenterLevel() || isTeacher();
         allow create: if (isAdmin() || isOperator()) && isValidId(testId) && isValidTest(incoming());
         allow update: if (isAdmin() || isOperator()) && isValidTest(incoming());
-        allow delete: if isAdmin();
+        allow delete: if canDelete();
     }
 
     match /results/{resultId} {
@@ -149,7 +153,7 @@ service cloud.firestore {
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), get(/databases/$(database)/documents/students/$(resource.data.regNo)).data.batchId));
       allow create: if (isAdmin() || isOperator()) && isValidId(resultId) && isValidResult(incoming());
       allow update: if (isAdmin() || isOperator()) && isValidResult(incoming());
-      allow delete: if isAdmin();
+      allow delete: if canDelete();
     }
 
     match /attendance/{id} {
@@ -175,6 +179,18 @@ service cloud.firestore {
     match /logs/{logId} {
       allow read: if isAdmin();
       allow create: if isSignedIn();
+    }
+
+    match /result_updated/{resultId} {
+      allow read: if isSignedIn();
+      allow create: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(resultId) && isValidResult(incoming());
+      allow update: if (isAdmin() || isOperator() || isCentralTeam()) && isValidResult(incoming());
+      allow delete: if (isAdmin() || isOperator() || isCentralTeam());
+    }
+
+    match /qbgLibrary/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isOperator();
     }
 
     match /qbgMaster/{id} {

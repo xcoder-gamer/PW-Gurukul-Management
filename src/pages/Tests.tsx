@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Button, Select, Input, Badge, Loader } from '../components/UI';
-import { Check, ChevronRight, ChevronLeft, Upload, FileJson, AlertCircle, Save, X, FileSpreadsheet, Download, Plus, CheckCircle2, Database, Pencil } from 'lucide-react';
+import { Check, ChevronRight, ChevronLeft, Upload, FileJson, AlertCircle, Save, X, FileSpreadsheet, Download, Plus, CheckCircle2, Database, Pencil, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, getDocs, addDoc, Timestamp, query, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, Timestamp, query, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
@@ -12,7 +12,8 @@ import { addLog, LogAction, LogCategory } from '../lib/logs';
 import { useAuth } from '../context/AuthContext';
 
 export default function Tests() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const navigate = useNavigate();
   const [view, setView] = useState<'list' | 'create' | 'detail'>('list');
   const [selectedTest, setSelectedTest] = useState<any>(null);
@@ -48,10 +49,19 @@ export default function Tests() {
     status: 'DRAFT' as 'ACTIVE' | 'DRAFT'
   });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedTestIds, setSelectedTestIds] = useState<string[]>([]);
 
   const [answerKeyFile, setAnswerKeyFile] = useState<string | null>(null);
   const [subQbgFile, setSubQbgFile] = useState<string | null>(null);
   const [paperFiles, setPaperFiles] = useState<Record<string, { answer?: string, mapping?: string }>>({});
+
+  const sortTests = (data: any[]) => {
+    return [...data].sort((a, b) => {
+      const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+      const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
+  };
 
   useEffect(() => {
     const fetchMasters = async () => {
@@ -68,7 +78,11 @@ export default function Tests() {
         setBatches(batchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setCenters(centerSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setPatterns(patternSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)));
+        setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
+          const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+          const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+          return timeB - timeA;
+        }));
         
         // Flatten hierarchical QBG Library
         const qbgList: any[] = [];
@@ -231,7 +245,12 @@ export default function Tests() {
           let maxQ = 0;
           rawData.forEach((row: any) => {
             const qNumRaw = row.Question || row.No || row.qNo || row.id || row.number || row.qIdx || row.qno || row.QNo || '';
-            const qNum = String(qNumRaw).trim().replace(/[^\d]/g, '');
+            const normalizedQNum = String(qNumRaw).trim().replace(/[^\d]/g, '');
+            if (!normalizedQNum) return;
+
+            const qInt = parseInt(normalizedQNum);
+            const qStr = String(qInt);
+            
             let ansRaw = row.Answer ?? row.Key ?? row.ans ?? row.answer ?? row['Correct Answer'] ?? row['correct answer'] ?? row.correctAns ?? '';
             let ans = String(ansRaw).trim();
             
@@ -240,10 +259,8 @@ export default function Tests() {
               ans = ans.slice(1, -1).trim();
             }
 
-            if (qNum && (ans !== '' || ansRaw === 0)) {
-              const qStr = String(qNum);
-              const qInt = parseInt(qStr);
-              if (!isNaN(qInt) && qInt > maxQ) maxQ = qInt;
+            if (qStr && (ans !== '' || ansRaw === 0)) {
+              if (qInt > maxQ) maxQ = qInt;
 
               // Handle Range detection
               let isRange = false;
@@ -352,11 +369,12 @@ export default function Tests() {
         rows.forEach(r => {
           // Handle Q-1, Q-2 or just 1, 2
           let qIdxRaw = String(r.Question || r.QNo || r.qIdx || r.qn || '');
-          const qIdx = qIdxRaw.replace('Q-', '').trim();
+          const normalizedQIdx = qIdxRaw.replace('Q-', '').replace(/[^\d]/g, '').trim();
           
-          if (qIdx) {
-            const qInt = parseInt(qIdx);
-            if (!isNaN(qInt) && qInt > maxQ) maxQ = qInt;
+          if (normalizedQIdx) {
+            const qInt = parseInt(normalizedQIdx);
+            const qIdx = String(qInt);
+            if (qInt > maxQ) maxQ = qInt;
             
             const rawDifficulty = String(r['Difficulty level'] || r.difficulty || '');
             let difficulty = rawDifficulty;
@@ -586,7 +604,11 @@ export default function Tests() {
       
       // Refresh list and reset
       const testSnap = await getDocs(collection(db, 'tests'));
-      setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)));
+      setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+      }));
       
       setView('list');
       resetForm();
@@ -617,6 +639,46 @@ export default function Tests() {
     setSubQbgFile(null);
     setPaperFiles({});
     setStep(1);
+  };
+
+  const handleDeleteTest = async (testId: string) => {
+    if (!window.confirm('CRITICAL: This will PERMANENTLY delete this test and it CANNOT be undone. All results for this test will stay in the database but will be orphaned. Are you sure?')) return;
+    
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, 'tests', testId));
+      toast.success('Test deleted permanently');
+      
+      const testSnap = await getDocs(collection(db, 'tests'));
+      setTests(sortTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'tests');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`CRITICAL: This will PERMANENTLY delete ${selectedTestIds.length} tests and all their data. This CANNOT be undone. Are you sure?`)) return;
+    
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      selectedTestIds.forEach(id => {
+        batch.delete(doc(db, 'tests', id));
+      });
+      await batch.commit();
+      
+      toast.success(`${selectedTestIds.length} tests deleted permanently`);
+      setSelectedTestIds([]);
+      
+      const testSnap = await getDocs(collection(db, 'tests'));
+      setTests(sortTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'tests_bulk');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const filteredTests = React.useMemo(() => {
@@ -1156,7 +1218,11 @@ export default function Tests() {
       toast.success('All tests synced with QBG Library');
       // Refresh list
       const testSnap = await getDocs(collection(db, 'tests'));
-      setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0)));
+      setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
+        return timeB - timeA;
+      }));
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'tests_sync');
     } finally {
@@ -1184,6 +1250,20 @@ export default function Tests() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              {isAdmin && (
+                <Button 
+                  variant="outline" 
+                  size="md" 
+                  onClick={() => {
+                    handleDeleteTest(selectedTest.id);
+                    setView('list');
+                    setSelectedTest(null);
+                  }} 
+                  className="border-rose-100 text-rose-500 hover:bg-rose-50 hover:border-rose-200 px-4 rounded-2xl"
+                >
+                  <Trash2 size={18} />
+                </Button>
+              )}
               <Button 
                 variant="secondary" 
                 size="md" 
@@ -1425,6 +1505,47 @@ export default function Tests() {
           </div>
         </Card>
 
+        {/* Bulk Actions */}
+        <AnimatePresence>
+          {selectedTestIds.length > 0 && (
+            <motion.div 
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 px-8 py-4 bg-slate-900 text-white rounded-3xl shadow-2xl border border-white/10 backdrop-blur-xl"
+            >
+              <div className="flex items-center gap-3 pr-6 border-r border-white/10">
+                <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xs">
+                  {selectedTestIds.length}
+                </div>
+                <span className="text-xs font-black uppercase tracking-widest text-slate-400">Tests Selected</span>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setSelectedTestIds([])}
+                  className="text-white hover:bg-white/10 font-bold px-4"
+                >
+                  Deselect All
+                </Button>
+                {isAdmin && (
+                  <Button 
+                    variant="primary" 
+                    size="sm" 
+                    onClick={handleBulkDelete}
+                    className="bg-rose-600 hover:bg-rose-700 text-white font-black uppercase tracking-widest text-[10px] px-6 py-2.5 rounded-xl border-none"
+                  >
+                    <Trash2 className="mr-2" size={14} />
+                    Delete Permanently
+                  </Button>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {loading ? (
             Array(8).fill(0).map((_, i) => <div key={i} className="h-48 bg-white rounded-[2.5rem] animate-pulse border border-slate-100" />)
@@ -1445,11 +1566,25 @@ export default function Tests() {
             </Card>
           ) : (
             filteredTests.map((test) => (
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} key={test.id}>
+              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} key={test.id} className="relative">
+                <div className="absolute top-4 left-4 z-10">
+                  <input 
+                    type="checkbox"
+                    className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer transition-all bg-white"
+                    checked={selectedTestIds.includes(test.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      setSelectedTestIds(prev => 
+                        prev.includes(test.id) ? prev.filter(id => id !== test.id) : [...prev, test.id]
+                      );
+                    }}
+                  />
+                </div>
                 <Card 
                   className={cn(
                     "p-6 h-full flex flex-col justify-between hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 group border-slate-100 cursor-pointer overflow-hidden",
-                    test.status === 'DRAFT' && "border-amber-200 bg-amber-50/20"
+                    test.status === 'DRAFT' && "border-amber-200 bg-amber-50/20",
+                    selectedTestIds.includes(test.id) && "border-blue-500 ring-2 ring-blue-500/10 bg-blue-50/20"
                   )}
                   onClick={() => {
                     if (test.status === 'DRAFT') {
@@ -1470,16 +1605,27 @@ export default function Tests() {
                         {test.status === 'DRAFT' ? <Save size={20} strokeWidth={3} /> : <Check size={20} strokeWidth={3} />}
                       </div>
                       <div className="flex items-center gap-2">
-                         <button 
-                            onClick={(e) => {
-                               e.stopPropagation();
-                               startEditing(test);
-                            }}
-                            className="p-2 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-xl text-slate-400 transition-all shadow-sm"
-                         >
-                            <Pencil size={16} strokeWidth={3} />
-                         </button>
-                         <Badge variant={test.status === 'DRAFT' ? 'amber' : (test.isActive ? 'green' : 'slate')}>
+                          <button 
+                             onClick={(e) => {
+                                e.stopPropagation();
+                                startEditing(test);
+                             }}
+                             className="p-2 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-xl text-slate-400 transition-all shadow-sm"
+                          >
+                             <Pencil size={16} strokeWidth={3} />
+                          </button>
+                          {isAdmin && (
+                            <button 
+                              onClick={(e) => {
+                                 e.stopPropagation();
+                                 handleDeleteTest(test.id);
+                              }}
+                              className="p-2 bg-slate-100 hover:bg-rose-600 hover:text-white rounded-xl text-slate-400 transition-all shadow-sm"
+                            >
+                               <Trash2 size={16} strokeWidth={3} />
+                            </button>
+                          )}
+                          <Badge variant={test.status === 'DRAFT' ? 'amber' : (test.isActive ? 'green' : 'slate')}>
                             {test.status === 'DRAFT' ? 'Draft' : (test.isActive ? 'Active' : 'Archived')}
                          </Badge>
                       </div>
