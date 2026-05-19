@@ -3443,6 +3443,38 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     };
   }, [result]);
 
+  const coreSubjects = useMemo(() => {
+    const stats = normalizedResult.subjectStats || {};
+    if (test?.pattern === 'NEET') {
+      const core = [
+        { id: 'Physics', label: 'Physics', color: 'text-amber-500' },
+        { id: 'Chemistry', label: 'Chemistry', color: 'text-indigo-500' }
+      ];
+      
+      const hasBotany = !!stats.Botany;
+      const hasZoology = !!stats.Zoology;
+      const hasBiology = !!stats.Biology;
+      
+      if (hasBotany) core.push({ id: 'Botany', label: 'Botany', color: 'text-emerald-500' });
+      if (hasZoology) core.push({ id: 'Zoology', label: 'Zoology', color: 'text-teal-500' });
+      
+      if (!hasBotany && !hasZoology && hasBiology) {
+        core.push({ id: 'Biology', label: 'Biology', color: 'text-emerald-500' });
+      } else if (!hasBotany && !hasZoology && !hasBiology) {
+         // Fallback if no bio subjects found in stats but it is NEET
+         core.push({ id: 'Botany', label: 'Botany', color: 'text-emerald-500' });
+         core.push({ id: 'Zoology', label: 'Zoology', color: 'text-teal-500' });
+      }
+      return core;
+    }
+    
+    return [
+      { id: 'Physics', label: 'Physics', color: 'text-amber-500' },
+      { id: 'Chemistry', label: 'Chemistry', color: 'text-indigo-500' },
+      { id: 'Math', label: 'Math', color: 'text-emerald-500', alt: ['Maths', 'Mathematics'] }
+    ];
+  }, [test?.pattern, normalizedResult.subjectStats]);
+
   const sortedTopicStats = useMemo(() => {
     if (!normalizedResult.topicStats) return [];
     let list = Object.entries(normalizedResult.topicStats).map(([id, stats]: [string, any]) => ({
@@ -3783,18 +3815,18 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
             <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest leading-none">Rank</p>
             <p className="text-3xl font-black text-white tracking-tighter">{result.isAbsent ? '—' : `#${result.rank || 0}`}</p>
           </div>
-          <div className="flex-1 px-8 text-center space-y-1">
-            <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest leading-none">Physics</p>
-            <p className="text-2xl font-black text-white">{result.isAbsent ? '—' : (normalizedResult.subjectStats?.Physics?.score || 0)}</p>
-          </div>
-          <div className="flex-1 px-8 text-center space-y-1">
-            <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest leading-none">Chemistry</p>
-            <p className="text-2xl font-black text-white">{result.isAbsent ? '—' : (normalizedResult.subjectStats?.Chemistry?.score || 0)}</p>
-          </div>
-          <div className="flex-1 px-8 text-center space-y-1">
-            <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest leading-none">Math</p>
-            <p className="text-2xl font-black text-white">{result.isAbsent ? '—' : (normalizedResult.subjectStats?.Math?.score || normalizedResult.subjectStats?.Mathematics?.score || 0)}</p>
-          </div>
+          {coreSubjects.map((sub) => (
+            <div key={sub.id} className="flex-1 px-8 text-center space-y-1">
+              <p className={cn("text-[9px] font-black uppercase tracking-widest leading-none", sub.color)}>{sub.label}</p>
+              <p className="text-2xl font-black text-white">
+                {result.isAbsent ? '—' : (
+                  normalizedResult.subjectStats?.[sub.id]?.score || 
+                  (sub.alt ? sub.alt.reduce((acc, k) => acc || normalizedResult.subjectStats?.[k]?.score, 0) : 0) || 
+                  0
+                )}
+              </p>
+            </div>
+          ))}
           <div className="flex-1 px-8 text-center space-y-1">
             <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest leading-none">Acc.</p>
             <p className="text-2xl font-black text-white">{result.isAbsent ? '—' : `${Math.round(currentAccuracy)}%`}</p>
@@ -4144,7 +4176,10 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                                 "w-2 h-2 rounded-full",
                                 subject === 'Physics' ? "bg-amber-500" :
                                 subject === 'Chemistry' ? "bg-indigo-500" :
-                                "bg-emerald-500"
+                                (subject === 'Botany' || subject === 'Biology') ? "bg-emerald-500" :
+                                subject === 'Zoology' ? "bg-teal-500" :
+                                (subject === 'Math' || subject === 'Mathematics') ? "bg-emerald-500" :
+                                "bg-slate-400"
                               )} />
                               <span className="text-sm font-black text-slate-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{subject}</span>
                             </div>
