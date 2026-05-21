@@ -8,6 +8,9 @@ interface MetadataContextType {
   centers: any[];
   batches: any[];
   testPatterns: any[];
+  qbgLibrary: any[];
+  qbgMap: Record<string, any>;
+  qbgFlatList: any[];
   loading: boolean;
   refreshMetadata: () => Promise<void>;
 }
@@ -20,6 +23,9 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
   const [centers, setCenters] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [testPatterns, setTestPatterns] = useState<any[]>([]);
+  const [qbgLibrary, setQbgLibrary] = useState<any[]>([]);
+  const [qbgMap, setQbgMap] = useState<Record<string, any>>({});
+  const [qbgFlatList, setQbgFlatList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
@@ -27,17 +33,82 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     setLoading(true);
     try {
-      const [progSnap, centSnap, batchSnap, patternSnap] = await Promise.all([
+      const [progSnap, centSnap, batchSnap, patternSnap, qbgSnap] = await Promise.all([
         getDocs(collection(db, 'programs')),
         getDocs(collection(db, 'centers')),
         getDocs(collection(db, 'batches')),
-        getDocs(collection(db, 'testPatterns'))
+        getDocs(collection(db, 'testPatterns')),
+        getDocs(collection(db, 'qbgLibrary'))
       ]);
 
       setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setCenters(centSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setBatches(batchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setTestPatterns(patternSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      
+      const qbgDocs = qbgSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      setQbgLibrary(qbgDocs);
+
+      // Pre-compute map and flatlist
+      const map: Record<string, any> = {};
+      const qbgList: any[] = [];
+
+      qbgDocs.forEach((sData: any) => {
+        const sId = sData.id;
+        const sName = sData.subject;
+
+        qbgList.push({ id: sId, name: sName, type: 'subject', subjectId: sId, subjectName: sName });
+
+        if (sData.data) {
+          Object.entries(sData.data).forEach(([chId, ch]: any) => {
+            qbgList.push({ 
+              id: chId, 
+              name: ch.name, 
+              type: 'chapter', 
+              subjectId: sId, 
+              subjectName: sName,
+              chapterId: chId,
+              chapterName: ch.name
+            });
+            if (ch.topics) {
+              Object.entries(ch.topics).forEach(([tId, t]: any) => {
+                map[tId] = { topic: t.name, chapter: ch.name, subject: sName };
+                qbgList.push({ 
+                  name: t.name, 
+                  type: 'topic', 
+                  subjectId: sId, 
+                  subjectName: sName,
+                  chapterId: chId,
+                  chapterName: ch.name,
+                  topicId: tId,
+                  topicName: t.name
+                });
+                if (t.subtopics) {
+                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
+                    map[stId] = { topic: st.name, chapter: ch.name, subject: sName };
+                    qbgList.push({ 
+                      name: st.name, 
+                      type: 'subtopic', 
+                      subjectId: sId, 
+                      subjectName: sName,
+                      chapterId: chId,
+                      chapterName: ch.name,
+                      topicId: tId,
+                      topicName: t.name,
+                      subtopicId: stId,
+                      subtopicName: st.name
+                    });
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
+
+      setQbgMap(map);
+      setQbgFlatList(qbgList);
+
       setLoaded(true);
     } catch (error) {
        console.error("Error pre-fetching master metadata:", error);
@@ -54,6 +125,9 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
       setCenters([]);
       setBatches([]);
       setTestPatterns([]);
+      setQbgLibrary([]);
+      setQbgMap({});
+      setQbgFlatList([]);
       setLoaded(false);
     }
   }, [user, loaded, fetchMetadata]);
@@ -64,7 +138,7 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <MetadataContext.Provider value={{ programs, centers, batches, testPatterns, loading, refreshMetadata }}>
+    <MetadataContext.Provider value={{ programs, centers, batches, testPatterns, qbgLibrary, qbgMap, qbgFlatList, loading, refreshMetadata }}>
       {children}
     </MetadataContext.Provider>
   );

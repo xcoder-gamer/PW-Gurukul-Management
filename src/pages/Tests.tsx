@@ -21,9 +21,8 @@ export default function Tests() {
   const [step, setStep] = useState(1);
   const [totalQuestions, setTotalQuestions] = useState(75);
   const [loading, setLoading] = useState(false);
-  const { programs, centers, batches, testPatterns: patterns } = useMetadata();
+  const { programs, centers, batches, testPatterns: patterns, qbgFlatList: qbgMaster } = useMetadata();
   const [tests, setTests] = useState<any[]>([]);
-  const [qbgMaster, setQbgMaster] = useState<any[]>([]);
 
   const [filters, setFilters] = useState({
     name: '',
@@ -64,72 +63,14 @@ export default function Tests() {
   useEffect(() => {
     const fetchMasters = async () => {
       try {
-        const [testSnap, qbgSnap] = await Promise.all([
-          getDocs(query(collection(db, 'tests'), limit(150))),
-          getDocs(collection(db, 'qbgLibrary'))
-        ]);
+        const testSnap = await getDocs(query(collection(db, 'tests'), limit(150)));
         setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
           const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
           const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
           return timeB - timeA;
         }));
-        
-        // Flatten hierarchical QBG Library
-        const qbgList: any[] = [];
-        qbgSnap.docs.forEach(docSnap => {
-          const sData = docSnap.data();
-          const sId = docSnap.id;
-          const sName = sData.subject;
-          
-          qbgList.push({ id: sId, name: sName, type: 'subject', subjectId: sId, subjectName: sName });
-
-          if (sData.data) {
-            Object.entries(sData.data).forEach(([chId, ch]: any) => {
-              qbgList.push({ 
-                id: chId, 
-                name: ch.name, 
-                type: 'chapter', 
-                subjectId: sId, 
-                subjectName: sName,
-                chapterId: chId,
-                chapterName: ch.name
-              });
-              if (ch.topics) {
-                Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                  qbgList.push({ 
-                    name: t.name, 
-                    type: 'topic', 
-                    subjectId: sId, 
-                    subjectName: sName,
-                    chapterId: chId,
-                    chapterName: ch.name,
-                    topicId: tId,
-                    topicName: t.name
-                  });
-                  if (t.subtopics) {
-                    Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                      qbgList.push({ 
-                        name: st.name, 
-                        type: 'subtopic', 
-                        subjectId: sId, 
-                        subjectName: sName,
-                        chapterId: chId,
-                        chapterName: ch.name,
-                        topicId: tId,
-                        topicName: t.name,
-                        subtopicId: stId,
-                        subtopicName: st.name
-                      });
-                    });
-                  }
-                });
-              }
-            });
-          }
-        });
-        setQbgMaster(qbgList);
       } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'programs_batches_tests_qbg_library');
+        handleFirestoreError(err, OperationType.LIST, 'tests');
       }
     };
     fetchMasters();

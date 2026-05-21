@@ -373,7 +373,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 
 export default function Results() {
   const { role } = useAuth();
-  const { programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
+  const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const canEdit = role === 'admin' || role === 'operator' || role === 'central_team';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
@@ -574,9 +574,8 @@ export default function Results() {
       }).filter(Boolean)));
 
       // 1. Fetch Masters for resolution
-      const [existingResultsSnap, qbgSnap] = await Promise.all([
-        getDocs(query(collection(db, 'result_updated'), where('testId', '==', targetTestId))),
-        getDocs(collection(db, 'qbgLibrary'))
+      const [existingResultsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'result_updated'), where('testId', '==', targetTestId)))
       ]);
 
       let studentMaster: any[] = [];
@@ -600,25 +599,7 @@ export default function Results() {
         return acc;
       }, {});
 
-      const qbgMap: Record<string, any> = {};
-      qbgSnap.docs.forEach(docSnap => {
-        const sData = docSnap.data();
-        if (sData.data) {
-          const sName = sData.subject;
-          Object.entries(sData.data).forEach(([chId, ch]: any) => {
-            if (ch.topics) {
-              Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                if (t.subtopics) {
-                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                  });
-                }
-              });
-            }
-          });
-        }
-      });
+      const qbgMap = metaQbgMap;
       
       const batchMapDetails = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
       const centerMapDetails = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
@@ -814,31 +795,7 @@ export default function Results() {
     const toastId = toast.loading('Re-evaluating...');
     
     try {
-      // Build comprehensive QBG mapping
-      const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
-      const qbgMap: Record<string, any> = {};
-      
-      qbgSnap.docs.forEach(docSnap => {
-        const sData = docSnap.data();
-        if (sData && sData.data && typeof sData.data === 'object') {
-          const sName = sData.subject;
-          Object.entries(sData.data).forEach(([chId, ch]: any) => {
-            if (ch && ch.topics) {
-              Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                if (t.subtopics) {
-                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                  });
-                }
-              });
-            }
-          });
-        }
-      });
-
-      // qbgMaster is legacy/obsolete. qbgLibrary is fully populated.
-      // We will rely on qbgMap built from qbgLibrary above.
+      const qbgMap = metaQbgMap;
 
       let totalUpdated = 0;
 
@@ -1852,35 +1809,14 @@ export default function Results() {
                       const test = tests.find(t => t.id === selectedTestIds[0]);
                       if (!test) return;
 
-                      // 1. Fetch data surgically (only the student record and qbgLibrary)
+                      // 1. Fetch data surgically (only the student record)
                       // Batches and Centers are already locally cached in useMetadata context
-                      const [studentsSnap, qbgSnap] = await Promise.all([
-                        getDocs(query(collection(db, 'students'), where('regNo', '==', manualData.regNo))),
-                        getDocs(collection(db, 'qbgLibrary'))
+                      const [studentsSnap] = await Promise.all([
+                        getDocs(query(collection(db, 'students'), where('regNo', '==', manualData.regNo)))
                       ]);
 
                       const studentInfo = studentsSnap.docs[0]?.data() || {};
-                      
-                      // Process qbgMap from structured qbgLibrary instead of dumping whole flat qbgMaster
-                      const qbgMap: Record<string, any> = {};
-                      qbgSnap.docs.forEach(docSnap => {
-                        const sData = docSnap.data();
-                        if (sData.data) {
-                          const sName = sData.subject;
-                          Object.entries(sData.data).forEach(([chId, ch]: any) => {
-                            if (ch.topics) {
-                              Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                                if (t.subtopics) {
-                                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                                  });
-                                }
-                              });
-                            }
-                          });
-                        }
-                      });
+                      const qbgMap = metaQbgMap;
 
                       const batchMap = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
                       const centerMap = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
@@ -2085,8 +2021,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   onTestToggle?: (id: string) => void,
   onSelectAllTests?: (ids: string[]) => void
 }) {
+  const { qbgMap } = useMetadata();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student'>('summary');
-  const [qbgMap, setQbgMap] = useState<Record<string, any>>({});
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -2110,39 +2046,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   useEffect(() => {
     // Initial sync removed as it is now managed by parent props
   }, [tests.length]);
-
-  useEffect(() => {
-    async function fetchQbg() {
-      try {
-        const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
-        const map: Record<string, any> = {};
-        
-        qbgSnap.docs.forEach(docSnap => {
-          const sData = docSnap.data();
-          const sName = sData.subject;
-          
-          if (sData.data) {
-            Object.entries(sData.data).forEach(([chId, ch]: any) => {
-              if (ch.topics) {
-                Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                  map[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                  if (t.subtopics) {
-                    Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                      map[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                    });
-                  }
-                });
-              }
-            });
-          }
-        });
-        setQbgMap(map);
-      } catch (err) {
-        console.error('Failed to fetch qbgLibrary for topic names:', err);
-      }
-    }
-    fetchQbg();
-  }, []);
 
   const aggregateStats = useMemo(() => {
     if (results.length === 0) return null;
@@ -3438,10 +3341,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () => void, onUpdate?: () => void }) {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const { qbgMap: qbgTopics } = useMetadata();
   const [test, setTest] = useState<any>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState<string>('');
-  const [qbgTopics, setQbgTopics] = useState<Record<string, any>>({});
   const [topicSort, setTopicSort] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
   const [omrFilter, setOmrFilter] = useState<{ status: string, difficulty: string, subject: string }>({
     status: 'all',
@@ -3532,39 +3435,6 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
   }, [normalizedResult.topicStats, topicSort, qbgTopics]);
 
   useEffect(() => {
-    const fetchQbg = async () => {
-      try {
-        const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
-        const map: Record<string, any> = {};
-        
-        qbgSnap.docs.forEach(docSnap => {
-          const sData = docSnap.data();
-          const sName = sData.subject;
-          
-          if (sData.data) {
-            Object.entries(sData.data).forEach(([chId, ch]: any) => {
-              if (ch.topics) {
-                Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                  map[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                  if (t.subtopics) {
-                    Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                      map[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                    });
-                  }
-                });
-              }
-            });
-          }
-        });
-        setQbgTopics(map);
-      } catch (err) {
-        console.error('Failed to fetch qbgLibrary:', err);
-      }
-    };
-    fetchQbg();
-  }, []);
-
-  useEffect(() => {
     const fetchTest = async () => {
       if (result.testId) {
         const docRef = doc(db, 'tests', result.testId);
@@ -3596,26 +3466,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     if (!test || !result.id) return;
     try {
       setIsSyncing(true);
-      const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
-      const qbgMap: Record<string, any> = {};
-      qbgSnap.docs.forEach(docSnap => {
-        const sData = docSnap.data();
-        if (sData && sData.data && typeof sData.data === 'object') {
-          const sName = sData.subject;
-          Object.entries(sData.data).forEach(([chId, ch]: any) => {
-            if (ch && ch.topics) {
-              Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                if (t.subtopics) {
-                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                  });
-                }
-              });
-            }
-          });
-        }
-      });
+      const qbgMap = qbgTopics;
       
       const stats = evaluateResult(result.responsesJson || {}, test.answerKey || {}, qbgMap, test.pattern);
       
@@ -3803,26 +3654,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                           ...newAnswers
                         };
 
-                        const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
-                        const qbgMap: Record<string, any> = {};
-                        qbgSnap.docs.forEach(docSnap => {
-                          const sData = docSnap.data();
-                          if (sData && sData.data && typeof sData.data === 'object') {
-                            const sName = sData.subject;
-                            Object.entries(sData.data).forEach(([chId, ch]: any) => {
-                              if (ch && ch.topics) {
-                                Object.entries(ch.topics).forEach(([tId, t]: any) => {
-                                  qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
-                                  if (t.subtopics) {
-                                    Object.entries(t.subtopics).forEach(([stId, st]: any) => {
-                                      qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
-                                    });
-                                  }
-                                });
-                              }
-                            });
-                          }
-                        });
+                        const qbgMap = qbgTopics;
                         const stats = evaluateResult(mergedAnswers, test.answerKey || {}, qbgMap, test.pattern);
 
                         await updateDoc(doc(db, 'result_updated', result.id), {
