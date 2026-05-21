@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { collection, query, getDocs, limit, orderBy, where, getCountFromServer } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
+import { useMetadata } from '../context/MetadataContext';
 import { Card, Button, Select, Input } from '../components/UI';
 import { Users, BookOpen, Target, Trophy, Plus, Upload, CheckCircle, ChevronRight, BarChart3, Clock, UserPlus, FilePlus, Database, Settings, LayoutDashboard, User as UserIcon, Filter, X, Calendar, MapPin, Layers } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,6 +11,7 @@ import { cn } from '../lib/utils';
 
 export default function Home() {
   const { user, role } = useAuth();
+  const { centers: metaCenters, batches: metaBatches } = useMetadata();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     students: 0,
@@ -35,25 +37,30 @@ export default function Home() {
   useEffect(() => {
     const fetchMasters = async () => {
       try {
-        const [centSnap, batchSnap, testSnap] = await Promise.all([
-          getDocs(query(collection(db, 'centers'), where('isActive', '==', true))),
-          getDocs(query(collection(db, 'batches'), where('isActive', '==', true))),
-          getDocs(query(collection(db, 'tests'), orderBy('date', 'desc')))
-        ]);
-        
+        const testSnap = await getDocs(query(collection(db, 'tests'), orderBy('date', 'desc'), limit(100)));
         const dates = Array.from(new Set(testSnap.docs.map(d => d.data().date).filter(Boolean))) as string[];
 
-        setMasters({
-          centers: centSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-          batches: batchSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        setMasters(prev => ({
+          ...prev,
           testDates: dates
-        });
+        }));
       } catch (err) {
-        console.error('Error fetching masters:', err);
+        console.error('Error fetching test dates:', err);
       }
     };
     fetchMasters();
   }, []);
+
+  useEffect(() => {
+    const activeCenters = metaCenters.filter(c => c.isActive !== false);
+    const activeBatches = metaBatches.filter(b => b.isActive !== false);
+
+    setMasters(prev => ({
+      ...prev,
+      centers: activeCenters,
+      batches: activeBatches
+    }));
+  }, [metaCenters, metaBatches]);
 
   useEffect(() => {
     const fetchData = async () => {

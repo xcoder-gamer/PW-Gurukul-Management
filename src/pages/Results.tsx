@@ -837,14 +837,8 @@ export default function Results() {
         }
       });
 
-      // Also fetch individual qbgMaster for backup/direct mapping
-      const qbgMasterSnap = await getDocs(collection(db, 'qbgMaster'));
-      qbgMasterSnap.docs.forEach(d => {
-        const data = d.data();
-        if (data.id && !qbgMap[data.id]) {
-          qbgMap[data.id] = data;
-        }
-      });
+      // qbgMaster is legacy/obsolete. qbgLibrary is fully populated.
+      // We will rely on qbgMap built from qbgLibrary above.
 
       let totalUpdated = 0;
 
@@ -1858,18 +1852,38 @@ export default function Results() {
                       const test = tests.find(t => t.id === selectedTestIds[0]);
                       if (!test) return;
 
-                      // 1. Fetch data for mapping
-                      const [studentsSnap, qbgSnap, batchSnap, centSnap] = await Promise.all([
+                      // 1. Fetch data surgically (only the student record and qbgLibrary)
+                      // Batches and Centers are already locally cached in useMetadata context
+                      const [studentsSnap, qbgSnap] = await Promise.all([
                         getDocs(query(collection(db, 'students'), where('regNo', '==', manualData.regNo))),
-                        getDocs(collection(db, 'qbgMaster')),
-                        getDocs(collection(db, 'batches')),
-                        getDocs(collection(db, 'centers'))
+                        getDocs(collection(db, 'qbgLibrary'))
                       ]);
 
                       const studentInfo = studentsSnap.docs[0]?.data() || {};
-                      const qbgMap = qbgSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.data().id]: d.data() }), {});
-                      const batchMap = batchSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
-                      const centerMap = centSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
+                      
+                      // Process qbgMap from structured qbgLibrary instead of dumping whole flat qbgMaster
+                      const qbgMap: Record<string, any> = {};
+                      qbgSnap.docs.forEach(docSnap => {
+                        const sData = docSnap.data();
+                        if (sData.data) {
+                          const sName = sData.subject;
+                          Object.entries(sData.data).forEach(([chId, ch]: any) => {
+                            if (ch.topics) {
+                              Object.entries(ch.topics).forEach(([tId, t]: any) => {
+                                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
+                                if (t.subtopics) {
+                                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
+                                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
+                                  });
+                                }
+                              });
+                            }
+                          });
+                        }
+                      });
+
+                      const batchMap = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+                      const centerMap = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
 
                       // 2. Scoring Logic (Unified)
                       const stats = evaluateResult(manualData.studentAnswers, test.answerKey || {}, qbgMap, test.pattern);
@@ -3582,8 +3596,26 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     if (!test || !result.id) return;
     try {
       setIsSyncing(true);
-      const qbgSnap = await getDocs(collection(db, 'qbgMaster'));
-      const qbgMap = qbgSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.data().id]: d.data() }), {});
+      const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
+      const qbgMap: Record<string, any> = {};
+      qbgSnap.docs.forEach(docSnap => {
+        const sData = docSnap.data();
+        if (sData && sData.data && typeof sData.data === 'object') {
+          const sName = sData.subject;
+          Object.entries(sData.data).forEach(([chId, ch]: any) => {
+            if (ch && ch.topics) {
+              Object.entries(ch.topics).forEach(([tId, t]: any) => {
+                qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
+                if (t.subtopics) {
+                  Object.entries(t.subtopics).forEach(([stId, st]: any) => {
+                    qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
       
       const stats = evaluateResult(result.responsesJson || {}, test.answerKey || {}, qbgMap, test.pattern);
       
@@ -3771,8 +3803,26 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                           ...newAnswers
                         };
 
-                        const qbgSnap = await getDocs(collection(db, 'qbgMaster'));
-                        const qbgMap = qbgSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.data().id]: d.data() }), {});
+                        const qbgSnap = await getDocs(collection(db, 'qbgLibrary'));
+                        const qbgMap: Record<string, any> = {};
+                        qbgSnap.docs.forEach(docSnap => {
+                          const sData = docSnap.data();
+                          if (sData && sData.data && typeof sData.data === 'object') {
+                            const sName = sData.subject;
+                            Object.entries(sData.data).forEach(([chId, ch]: any) => {
+                              if (ch && ch.topics) {
+                                Object.entries(ch.topics).forEach(([tId, t]: any) => {
+                                  qbgMap[tId] = { topic: t.name, chapter: ch.name, subject: sName };
+                                  if (t.subtopics) {
+                                    Object.entries(t.subtopics).forEach(([stId, st]: any) => {
+                                      qbgMap[stId] = { topic: st.name, chapter: ch.name, subject: sName };
+                                    });
+                                  }
+                                });
+                              }
+                            });
+                          }
+                        });
                         const stats = evaluateResult(mergedAnswers, test.answerKey || {}, qbgMap, test.pattern);
 
                         await updateDoc(doc(db, 'result_updated', result.id), {
