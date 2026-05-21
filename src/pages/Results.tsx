@@ -30,6 +30,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { BottomSheet } from './Students';
 import { cn } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
+import { useMetadata } from '../context/MetadataContext';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { 
   collection, 
@@ -44,7 +45,8 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
-  deleteDoc
+  deleteDoc,
+  limit
 } from 'firebase/firestore';
 import Papa from 'papaparse';
 
@@ -160,8 +162,16 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
                              rawDiff || 'Normal';
 
     const chap = qData.chapter || chapterId || 'General';
-    const rawSubject = qData.subject || subjectId || 'N/A';
-    const subject = (rawSubject.toLowerCase() === 'math' || rawSubject.toLowerCase() === 'maths' || rawSubject.toLowerCase() === 'mathematics') ? 'Math' : rawSubject;
+    const rawSubject = String(qData.subject || subjectId || 'N/A').trim();
+    const subLower = rawSubject.toLowerCase();
+    let subject = rawSubject;
+    
+    if (subLower === 'math' || subLower === 'maths' || subLower === 'mathematics') subject = 'Math';
+    else if (subLower === 'physics') subject = 'Physics';
+    else if (subLower === 'chemistry') subject = 'Chemistry';
+    else if (subLower === 'botany') subject = 'Botany';
+    else if (subLower === 'zoology') subject = 'Zoology';
+    else if (subLower === 'biology') subject = 'Biology';
     const topic = qbgMap[topicId]?.topic || qData.topic || topicId || '';
     const diff = normalizedDifficulty;
 
@@ -363,6 +373,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 
 export default function Results() {
   const { role } = useAuth();
+  const { programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const canEdit = role === 'admin' || role === 'operator' || role === 'central_team';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
@@ -527,15 +538,14 @@ export default function Results() {
     });
     return Array.from(subjects).sort();
   }, [results]);
-  const [masters, setMasters] = useState<any>({
-    programs: [],
-    centers: [],
-    batches: []
-  });
+  const masters = useMemo(() => ({
+    programs: metaPrograms,
+    centers: metaCenters,
+    batches: metaBatches
+  }), [metaPrograms, metaCenters, metaBatches]);
 
   useEffect(() => {
     fetchTests();
-    fetchMasters();
     
     // Handle action from external links
     const params = new URLSearchParams(window.location.search);
@@ -543,23 +553,6 @@ export default function Results() {
       setIsBulkUploadOpen(true);
     }
   }, []);
-
-  const fetchMasters = async () => {
-    try {
-      const [p, c, b] = await Promise.all([
-        getDocs(collection(db, 'programs')),
-        getDocs(collection(db, 'centers')),
-        getDocs(collection(db, 'batches'))
-      ]);
-      setMasters({
-        programs: p.docs.map(d => ({ id: d.id, ...d.data() })),
-        centers: c.docs.map(d => ({ id: d.id, ...d.data() })),
-        batches: b.docs.map(d => ({ id: d.id, ...d.data() }))
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   const handleBulkOMRUpload = async (jsonData: any[], targetTestId: string, paperName?: string) => {
     if (!targetTestId) {
@@ -574,22 +567,39 @@ export default function Results() {
       const test = tests.find(t => t.id === targetTestId);
       if (!test) throw new Error('Test template not found');
 
+      // Extract unique registration numbers from OMR sheet to fetch student records surgically
+      const regNosInFile = Array.from(new Set(jsonData.map(row => {
+        const regNoRaw = row.regNo || row.registrationNo || row.rollNo || row.ID || row['Reg No'] || row.RollNum || row.EnrollmentNo || '';
+        return String(regNoRaw).trim().toUpperCase();
+      }).filter(Boolean)));
+
       // 1. Fetch Masters for resolution
-      const [studentsSnap, qbgSnap, batchSnap, centSnap, progSnap, existingResultsSnap] = await Promise.all([
-        getDocs(collection(db, 'students')),
-        getDocs(collection(db, 'qbgLibrary')),
-        getDocs(collection(db, 'batches')),
-        getDocs(collection(db, 'centers')),
-        getDocs(collection(db, 'programs')),
-        getDocs(query(collection(db, 'result_updated'), where('testId', '==', targetTestId)))
+      const [existingResultsSnap, qbgSnap] = await Promise.all([
+        getDocs(query(collection(db, 'result_updated'), where('testId', '==', targetTestId))),
+        getDocs(collection(db, 'qbgLibrary'))
       ]);
+
+      let studentMaster: any[] = [];
+      if (regNosInFile.length > 0) {
+        // Firestore limit is 30 for 'in' queries
+        const chunksOf30: string[][] = [];
+        for (let offset = 0; offset < regNosInFile.length; offset += 30) {
+          chunksOf30.push(regNosInFile.slice(offset, offset + 30));
+        }
+        const studentChunks = await Promise.all(
+          chunksOf30.map(async (chunk) => {
+            const snap = await getDocs(query(collection(db, 'students'), where('regNo', 'in', chunk)));
+            return snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+          })
+        );
+        studentMaster = studentChunks.flat();
+      }
 
       const existingResultsMap = existingResultsSnap.docs.reduce((acc: any, d) => {
         acc[String(d.data().regNo).toUpperCase()] = { id: d.id, ...d.data() };
         return acc;
       }, {});
 
-      const studentMaster = studentsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       const qbgMap: Record<string, any> = {};
       qbgSnap.docs.forEach(docSnap => {
         const sData = docSnap.data();
@@ -610,9 +620,9 @@ export default function Results() {
         }
       });
       
-      const batchMapDetails = batchSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
-      const centerMapDetails = centSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
-      const progMapDetails = progSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
+      const batchMapDetails = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+      const centerMapDetails = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+      const progMapDetails = metaPrograms.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
 
       // 2. Process rows
       let count = 0;
@@ -709,12 +719,9 @@ export default function Results() {
     setIsSyncingGlobal(true);
     const toastId = toast.loading('Syncing student metadata...');
     try {
-      const [resultsSnap, studentsSnap, batchSnap, centSnap, progSnap] = await Promise.all([
+      const [resultsSnap, studentsSnap] = await Promise.all([
         getDocs(collection(db, 'result_updated')),
-        getDocs(collection(db, 'students')),
-        getDocs(collection(db, 'batches')),
-        getDocs(collection(db, 'centers')),
-        getDocs(collection(db, 'programs'))
+        getDocs(collection(db, 'students'))
       ]);
 
       const studentMap = studentsSnap.docs.reduce((acc: any, d) => {
@@ -723,9 +730,9 @@ export default function Results() {
         return acc;
       }, {});
       
-      const batchMap = batchSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
-      const centerMap = centSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
-      const progMap = progSnap.docs.reduce((acc: any, d) => ({ ...acc, [d.id]: d.data() }), {});
+      const batchMap = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+      const centerMap = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+      const progMap = metaPrograms.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
 
       let updateCount = 0;
       let currentBatch = writeBatch(db);
@@ -883,7 +890,7 @@ export default function Results() {
 
   const fetchTests = async () => {
     try {
-      const snap = await getDocs(collection(db, 'tests'));
+      const snap = await getDocs(query(collection(db, 'tests'), limit(150)));
       setTests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'tests');
@@ -3445,15 +3452,19 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
 
   const coreSubjects = useMemo(() => {
     const stats = normalizedResult.subjectStats || {};
-    if (test?.pattern === 'NEET') {
+    const pattern = (test?.pattern || '').toUpperCase();
+    const hasBio = !!(stats.Botany || stats.Zoology || stats.Biology || stats.botany || stats.zoology || stats.biology);
+    
+    // If explicitly NEET or if it looks like a Bio/NEET test from the stats
+    if (pattern === 'NEET' || hasBio) {
       const core = [
         { id: 'Physics', label: 'Physics', color: 'text-amber-500' },
         { id: 'Chemistry', label: 'Chemistry', color: 'text-indigo-500' }
       ];
       
-      const hasBotany = !!stats.Botany;
-      const hasZoology = !!stats.Zoology;
-      const hasBiology = !!stats.Biology;
+      const hasBotany = !!(stats.Botany || stats.botany);
+      const hasZoology = !!(stats.Zoology || stats.zoology);
+      const hasBiology = !!(stats.Biology || stats.biology);
       
       if (hasBotany) core.push({ id: 'Botany', label: 'Botany', color: 'text-emerald-500' });
       if (hasZoology) core.push({ id: 'Zoology', label: 'Zoology', color: 'text-teal-500' });
@@ -3461,17 +3472,18 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
       if (!hasBotany && !hasZoology && hasBiology) {
         core.push({ id: 'Biology', label: 'Biology', color: 'text-emerald-500' });
       } else if (!hasBotany && !hasZoology && !hasBiology) {
-         // Fallback if no bio subjects found in stats but it is NEET
+         // Fallback if no bio subjects found in stats but it IS expected to be NEET/Bio
          core.push({ id: 'Botany', label: 'Botany', color: 'text-emerald-500' });
          core.push({ id: 'Zoology', label: 'Zoology', color: 'text-teal-500' });
       }
       return core;
     }
     
+    // Default to Physics, Chemistry, Math for everything else
     return [
       { id: 'Physics', label: 'Physics', color: 'text-amber-500' },
       { id: 'Chemistry', label: 'Chemistry', color: 'text-indigo-500' },
-      { id: 'Math', label: 'Math', color: 'text-emerald-500', alt: ['Maths', 'Mathematics'] }
+      { id: 'Math', label: 'Math', color: 'text-emerald-500', alt: ['Maths', 'Mathematics', 'MATH', 'MATHS', 'MATHEMATICS'] }
     ];
   }, [test?.pattern, normalizedResult.subjectStats]);
 

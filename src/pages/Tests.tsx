@@ -4,12 +4,13 @@ import { Check, ChevronRight, ChevronLeft, Upload, FileJson, AlertCircle, Save, 
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, getDocs, addDoc, Timestamp, query, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, addDoc, Timestamp, query, where, deleteDoc, doc, writeBatch, updateDoc, limit } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { addLog, LogAction, LogCategory } from '../lib/logs';
 import { useAuth } from '../context/AuthContext';
+import { useMetadata } from '../context/MetadataContext';
 
 export default function Tests() {
   const { user, role } = useAuth();
@@ -20,10 +21,7 @@ export default function Tests() {
   const [step, setStep] = useState(1);
   const [totalQuestions, setTotalQuestions] = useState(75);
   const [loading, setLoading] = useState(false);
-  const [patterns, setPatterns] = useState<any[]>([]);
-  const [programs, setPrograms] = useState<any[]>([]);
-  const [batches, setBatches] = useState<any[]>([]);
-  const [centers, setCenters] = useState<any[]>([]);
+  const { programs, centers, batches, testPatterns: patterns } = useMetadata();
   const [tests, setTests] = useState<any[]>([]);
   const [qbgMaster, setQbgMaster] = useState<any[]>([]);
 
@@ -66,18 +64,10 @@ export default function Tests() {
   useEffect(() => {
     const fetchMasters = async () => {
       try {
-        const [progSnap, batchSnap, testSnap, qbgSnap, centerSnap, patternSnap] = await Promise.all([
-          getDocs(collection(db, 'programs')),
-          getDocs(collection(db, 'batches')),
-          getDocs(collection(db, 'tests')),
-          getDocs(collection(db, 'qbgLibrary')),
-          getDocs(collection(db, 'centers')),
-          getDocs(collection(db, 'testPatterns'))
+        const [testSnap, qbgSnap] = await Promise.all([
+          getDocs(query(collection(db, 'tests'), limit(150))),
+          getDocs(collection(db, 'qbgLibrary'))
         ]);
-        setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setBatches(batchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setCenters(centerSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setPatterns(patternSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
           const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
           const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
@@ -259,6 +249,17 @@ export default function Tests() {
               ans = ans.slice(1, -1).trim();
             }
 
+            const subRaw = String(row.subject || row.Subject || '').trim();
+            const subL = subRaw.toLowerCase();
+            let subNorm = subRaw;
+            
+            if (subL === 'math' || subL === 'maths' || subL === 'mathematics') subNorm = 'Math';
+            else if (subL === 'physics') subNorm = 'Physics';
+            else if (subL === 'chemistry') subNorm = 'Chemistry';
+            else if (subL === 'botany') subNorm = 'Botany';
+            else if (subL === 'zoology') subNorm = 'Zoology';
+            else if (subL === 'biology') subNorm = 'Biology';
+
             if (qStr && (ans !== '' || ansRaw === 0)) {
               if (qInt > maxQ) maxQ = qInt;
 
@@ -302,7 +303,7 @@ export default function Tests() {
                 isRange,
                 rangeMin,
                 rangeMax,
-                subject: (String(row.subject || row.Subject || '').toLowerCase() === 'math' || String(row.subject || row.Subject || '').toLowerCase() === 'maths' || String(row.subject || row.Subject || '').toLowerCase() === 'mathematics') ? 'Math' : (row.subject || row.Subject || ''),
+                subject: subNorm,
                 correct: pos,
                 wrong: neg,
                 unattempt: parseFloat(row['unattempt'] || row.unattempted || 0),
@@ -449,8 +450,13 @@ export default function Tests() {
   };
 
   const handleCreateTest = async (isDraft: boolean = false) => {
-    if (!isDraft && (!formData.name || !formData.date || !formData.programId || !formData.answerKey)) {
-      toast.error('Required fields missing');
+    // Better validation for answer keys
+    const hasKey = formData.pattern === 'JEE_ADVANCED' 
+      ? Object.keys(formData.paperKeys).length > 0 
+      : Object.keys(formData.answerKey).length > 0;
+
+    if (!isDraft && (!formData.name || !formData.date || !formData.programId || !hasKey)) {
+      toast.error('Required fields missing (Name, Date, Program, and Answer Key are mandatory)');
       return;
     }
     
@@ -512,8 +518,16 @@ export default function Tests() {
 
               const mappedDiff = mapped.difficulty || 'Medium';
 
-              const subLookupName = subjectLookup?.name || mapped.subject || '';
-              const normalizedSubName = (subLookupName.toLowerCase() === 'math' || subLookupName.toLowerCase() === 'maths' || subLookupName.toLowerCase() === 'mathematics') ? 'Math' : subLookupName;
+              const subLookupName = String(subjectLookup?.name || mapped.subject || '').trim();
+              const subLower = subLookupName.toLowerCase();
+              let normalizedSubName = subLookupName;
+              
+              if (subLower === 'math' || subLower === 'maths' || subLower === 'mathematics') normalizedSubName = 'Math';
+              else if (subLower === 'physics') normalizedSubName = 'Physics';
+              else if (subLower === 'chemistry') normalizedSubName = 'Chemistry';
+              else if (subLower === 'botany') normalizedSubName = 'Botany';
+              else if (subLower === 'zoology') normalizedSubName = 'Zoology';
+              else if (subLower === 'biology') normalizedSubName = 'Biology';
 
               finalAnswerKey[qNum] = {
                 ...finalAnswerKey[qNum],
@@ -569,7 +583,6 @@ export default function Tests() {
       const sanitizedPayload = sanitize(payload);
 
       if (editingId) {
-        const { updateDoc, doc } = await import('firebase/firestore');
         await updateDoc(doc(db, 'tests', editingId), sanitizedPayload);
         
         await addLog({
@@ -613,6 +626,9 @@ export default function Tests() {
       setView('list');
       resetForm();
     } catch (error) {
+      console.error('Test Save Error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred while saving test';
+      toast.error(`Failed to save test: ${errorMessage}`);
       handleFirestoreError(error, OperationType.WRITE, 'tests');
     } finally {
       setLoading(false);

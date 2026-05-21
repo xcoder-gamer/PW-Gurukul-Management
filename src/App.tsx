@@ -2,6 +2,7 @@ import React, { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { MetadataProvider } from './context/MetadataContext';
 import { BottomNav } from './components/BottomNav';
 import { Sidebar } from './components/Sidebar';
 import { Button } from './components/UI';
@@ -145,19 +146,21 @@ export default function App() {
     <BrowserRouter>
       <Toaster position="top-right" richColors closeButton />
       <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<PrivateRoute><HomeSelector /></PrivateRoute>} />
-          <Route path="/students" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Students /></RestrictedRoute></PrivateRoute>} />
-          <Route path="/tests" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level']}><Tests /></RestrictedRoute></PrivateRoute>} />
-          <Route path="/results" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Results /></RestrictedRoute></PrivateRoute>} />
-          <Route path="/more" element={<PrivateRoute><AdminRoute><More /></AdminRoute></PrivateRoute>} />
-          <Route path="/masters/qbg" element={<PrivateRoute><AdminRoute><QBG /></AdminRoute></PrivateRoute>} />
-          <Route path="/masters/patterns" element={<PrivateRoute><AdminRoute><Patterns /></AdminRoute></PrivateRoute>} />
-          <Route path="/logs" element={<PrivateRoute><AdminRoute><Logs /></AdminRoute></PrivateRoute>} />
-          <Route path="/masters/:type" element={<PrivateRoute><AdminRoute><Masters /></AdminRoute></PrivateRoute>} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+        <MetadataProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<PrivateRoute><HomeSelector /></PrivateRoute>} />
+            <Route path="/students" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Students /></RestrictedRoute></PrivateRoute>} />
+            <Route path="/tests" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level']}><Tests /></RestrictedRoute></PrivateRoute>} />
+            <Route path="/results" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'teacher']}><Results /></RestrictedRoute></PrivateRoute>} />
+            <Route path="/more" element={<PrivateRoute><AdminRoute><More /></AdminRoute></PrivateRoute>} />
+            <Route path="/masters/qbg" element={<PrivateRoute><AdminRoute><QBG /></AdminRoute></PrivateRoute>} />
+            <Route path="/masters/patterns" element={<PrivateRoute><AdminRoute><Patterns /></AdminRoute></PrivateRoute>} />
+            <Route path="/logs" element={<PrivateRoute><AdminRoute><Logs /></AdminRoute></PrivateRoute>} />
+            <Route path="/masters/:type" element={<PrivateRoute><AdminRoute><Masters /></AdminRoute></PrivateRoute>} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </MetadataProvider>
       </AuthProvider>
     </BrowserRouter>
   );

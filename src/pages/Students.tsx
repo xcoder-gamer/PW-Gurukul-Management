@@ -28,6 +28,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
+import { useMetadata } from '../context/MetadataContext';
 import { toast } from 'sonner';
 import { addLog, LogAction, LogCategory } from '../lib/logs';
 import { useAuth } from '../context/AuthContext';
@@ -53,9 +54,7 @@ export default function Students() {
   }, [selectedIds]);
   
   const [search, setSearch] = useState('');
-  const [programs, setPrograms] = useState<any[]>([]);
-  const [centers, setCenters] = useState<any[]>([]);
-  const [batches, setBatches] = useState<any[]>([]);
+  const { programs, centers, batches } = useMetadata();
   
   const [filters, setFilters] = useState({
     program: '',
@@ -87,19 +86,7 @@ export default function Students() {
 
   useEffect(() => {
     fetchStudents();
-    fetchMasters();
   }, []);
-
-  const fetchMasters = async () => {
-    const [progSnap, centSnap, batchSnap] = await Promise.all([
-      getDocs(collection(db, 'programs')),
-      getDocs(collection(db, 'centers')),
-      getDocs(collection(db, 'batches'))
-    ]);
-    setPrograms(progSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    setCenters(centSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    setBatches(batchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, query, getDocs, limit, orderBy, where } from 'firebase/firestore';
+import { collection, query, getDocs, limit, orderBy, where, getCountFromServer } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
 import { Card, Button, Select, Input } from '../components/UI';
@@ -66,7 +66,6 @@ export default function Home() {
 
         let testQuery = query(collection(db, 'tests'));
         if (filters.batchIds.length > 0) {
-          // If we have multiple batches, array-contains-any is needed
           testQuery = query(testQuery, where('batchIds', 'array-contains-any', filters.batchIds));
         }
         if (filters.testDates.length > 0) testQuery = query(testQuery, where('date', 'in', filters.testDates));
@@ -75,15 +74,25 @@ export default function Home() {
         if (filters.batchIds.length > 0) resultQuery = query(resultQuery, where('batchId', 'in', filters.batchIds));
         if (filters.centerIds.length > 0) resultQuery = query(resultQuery, where('centerId', 'in', filters.centerIds));
 
-        const [studentSnap, testSnap, progSnap, resultSnap, totalTestSnap] = await Promise.all([
-          getDocs(studentQuery),
+        // Aggregate counts: 100% server-side optimized counts
+        // Accuracy limits: We fetch a strong sample of latest 200 results to calculate representative avg. accuracy
+        const [
+          studentCountSnap,
+          testSnap,
+          progCountSnap,
+          resultCountSnap,
+          totalTestCountSnap,
+          resultsAccuracySampleSnap
+        ] = await Promise.all([
+          getCountFromServer(studentQuery),
           getDocs(query(testQuery, orderBy('createdAt', 'desc'), limit(5))),
-          getDocs(collection(db, 'programs')),
-          getDocs(resultQuery),
-          getDocs(testQuery).catch(() => ({ size: 0, docs: [] })) // Fallback for complex queries
+          getCountFromServer(collection(db, 'programs')),
+          getCountFromServer(resultQuery),
+          getCountFromServer(testQuery).catch(() => ({ data: () => ({ count: 0 }) })),
+          getDocs(query(resultQuery, limit(200)))
         ]);
 
-        const validResults = resultSnap.docs.filter((d: any) => !d.data().isAbsent);
+        const validResults = resultsAccuracySampleSnap.docs.filter((d: any) => !d.data().isAbsent);
         let avgAcc = 0;
         if (validResults.length > 0) {
           const totalAcc = validResults.reduce((sum: number, d: any) => sum + (d.data().accuracy || 0), 0);
@@ -91,11 +100,11 @@ export default function Home() {
         }
 
         setStats({
-          students: studentSnap.size,
-          tests: totalTestSnap.size,
+          students: studentCountSnap.data().count,
+          tests: totalTestCountSnap.data().count,
           avgAccuracy: avgAcc || 0,
-          activePrograms: progSnap.size,
-          totalResults: resultSnap.size
+          activePrograms: progCountSnap.data().count,
+          totalResults: resultCountSnap.data().count
         });
 
         setRecentTests(testSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() })));
