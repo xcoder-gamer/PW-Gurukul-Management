@@ -36,6 +36,24 @@ export default function Home() {
 
   useEffect(() => {
     const fetchMasters = async () => {
+      const cacheKey = 'home_test_dates_cache';
+      const now = Date.now();
+      const cached = sessionStorage.getItem(cacheKey);
+      if (cached) {
+        try {
+          const { dates, timestamp } = JSON.parse(cached);
+          if (now - timestamp < 15 * 60 * 1000) { // 15 minutes cache
+            setMasters(prev => ({
+              ...prev,
+              testDates: dates
+            }));
+            return;
+          }
+        } catch (e) {
+          console.warn("Failed parsing test dates cache:", e);
+        }
+      }
+
       try {
         const testSnap = await getDocs(query(collection(db, 'tests'), orderBy('date', 'desc'), limit(100)));
         const dates = Array.from(new Set(testSnap.docs.map(d => d.data().date).filter(Boolean))) as string[];
@@ -43,6 +61,11 @@ export default function Home() {
         setMasters(prev => ({
           ...prev,
           testDates: dates
+        }));
+
+        sessionStorage.setItem(cacheKey, JSON.stringify({
+          dates,
+          timestamp: now
         }));
       } catch (err) {
         console.error('Error fetching test dates:', err);
@@ -64,6 +87,23 @@ export default function Home() {
 
   useEffect(() => {
     const fetchData = async () => {
+      const filterKey = `home_dashboard_cache_${JSON.stringify(filters)}`;
+      const now = Date.now();
+      const cached = sessionStorage.getItem(filterKey);
+      if (cached) {
+        try {
+          const { stats: cachedStats, recentTests: cachedRecent, timestamp } = JSON.parse(cached);
+          if (now - timestamp < 5 * 60 * 1000) { // 5 minutes cache duration
+            setStats(cachedStats);
+            setRecentTests(cachedRecent);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          console.warn("Parsing cached home stats failed:", e);
+        }
+      }
+
       try {
         setLoading(true);
         
@@ -106,15 +146,23 @@ export default function Home() {
           avgAcc = Math.round(totalAcc / validResults.length);
         }
 
-        setStats({
+        const freshStats = {
           students: studentCountSnap.data().count,
           tests: totalTestCountSnap.data().count,
           avgAccuracy: avgAcc || 0,
           activePrograms: progCountSnap.data().count,
           totalResults: resultCountSnap.data().count
-        });
+        };
+        const freshRecentTests = testSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() }));
 
-        setRecentTests(testSnap.docs.map((doc: any) => ({ id: doc.id, ...doc.data() })));
+        setStats(freshStats);
+        setRecentTests(freshRecentTests);
+
+        sessionStorage.setItem(filterKey, JSON.stringify({
+          stats: freshStats,
+          recentTests: freshRecentTests,
+          timestamp: now
+        }));
       } catch (error) {
         console.error('Home stats error:', error);
       } finally {
@@ -170,21 +218,6 @@ export default function Home() {
             Welcome back, <span className="text-slate-900 font-bold">{user?.displayName || user?.email?.split('@')[0]}</span>. 
             Here's what's happening today.
           </p>
-        </div>
-        
-        <div className="flex items-center gap-3 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm overflow-hidden min-w-[280px]">
-          <div className="flex -space-x-2 pl-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="w-8 h-8 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-400">
-                U{i}
-              </div>
-            ))}
-          </div>
-          <div className="h-4 w-px bg-slate-100 mx-1" />
-          <p className="text-xs font-bold text-slate-500 px-2 flex-1">Team Members Online</p>
-          <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
-            <Plus size={16} />
-          </div>
         </div>
       </div>
 

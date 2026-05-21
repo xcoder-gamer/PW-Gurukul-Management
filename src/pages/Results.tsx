@@ -417,6 +417,24 @@ export default function Results() {
     batchId: ''
   });
 
+  const [wizardProgramId, setWizardProgramId] = useState('');
+  const [wizardBatchId, setWizardBatchId] = useState('');
+  const [testSearchQuery, setTestSearchQuery] = useState('');
+
+  const wizardFilteredBatches = useMemo(() => {
+    if (!wizardProgramId) return metaBatches.filter(b => b.isActive);
+    return metaBatches.filter(b => b.programId === wizardProgramId && b.isActive);
+  }, [wizardProgramId, metaBatches]);
+
+  const wizardFilteredTests = useMemo(() => {
+    return tests.filter(t => {
+      const matchesProg = !wizardProgramId || t.programId === wizardProgramId;
+      const matchesBatch = !wizardBatchId || t.batchIds?.includes(wizardBatchId);
+      const matchesSearch = !testSearchQuery || t.name?.toLowerCase().includes(testSearchQuery.toLowerCase()) || String(t.pattern || '').toLowerCase().includes(testSearchQuery.toLowerCase());
+      return matchesProg && matchesBatch && matchesSearch;
+    });
+  }, [wizardProgramId, wizardBatchId, testSearchQuery, tests]);
+
   const sortedResults = useMemo(() => {
     // Standardize results into map format for easiest UI consumption
     const normalizedResults = results.map(res => ({
@@ -554,6 +572,16 @@ export default function Results() {
     }
   }, []);
 
+  const getRowValue = (row: any, keys: string[]) => {
+    for (const k of Object.keys(row)) {
+      const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (keys.some(tk => tk.toLowerCase().replace(/[^a-z0-9]/g, '') === norm)) {
+        return row[k];
+      }
+    }
+    return undefined;
+  };
+
   const handleBulkOMRUpload = async (jsonData: any[], targetTestId: string, paperName?: string) => {
     if (!targetTestId) {
       toast.error('No test selected for upload');
@@ -569,8 +597,8 @@ export default function Results() {
 
       // Extract unique registration numbers from OMR sheet to fetch student records surgically
       const regNosInFile = Array.from(new Set(jsonData.map(row => {
-        const regNoRaw = row.regNo || row.registrationNo || row.rollNo || row.ID || row['Reg No'] || row.RollNum || row.EnrollmentNo || '';
-        return String(regNoRaw).trim().toUpperCase();
+        const regNoRaw = getRowValue(row, ['regNo', 'registrationNo', 'rollNo', 'id', 'reg_no', 'roll_no', 'studid', 'rollnum', 'enrollmentno', 'student_id']);
+        return String(regNoRaw || '').trim();
       }).filter(Boolean)));
 
       // 1. Fetch Masters for resolution
@@ -580,10 +608,17 @@ export default function Results() {
 
       let studentMaster: any[] = [];
       if (regNosInFile.length > 0) {
+        const queryRegsSet = new Set<string>();
+        regNosInFile.forEach(r => {
+          queryRegsSet.add(r.toUpperCase());
+          queryRegsSet.add(r.toLowerCase());
+        });
+        const queryRegs = Array.from(queryRegsSet);
+
         // Firestore limit is 30 for 'in' queries
         const chunksOf30: string[][] = [];
-        for (let offset = 0; offset < regNosInFile.length; offset += 30) {
-          chunksOf30.push(regNosInFile.slice(offset, offset + 30));
+        for (let offset = 0; offset < queryRegs.length; offset += 30) {
+          chunksOf30.push(queryRegs.slice(offset, offset + 30));
         }
         const studentChunks = await Promise.all(
           chunksOf30.map(async (chunk) => {
@@ -618,11 +653,11 @@ export default function Results() {
         const resultsBatch = writeBatch(db);
         
         for (const row of chunk) {
-          const regNoRaw = row.regNo || row.registrationNo || row.rollNo || row.ID || row['Reg No'] || row.RollNum || row.EnrollmentNo || '';
-          const regNo = String(regNoRaw).trim().toUpperCase();
+          const regNoRaw = getRowValue(row, ['regNo', 'registrationNo', 'rollNo', 'id', 'reg_no', 'roll_no', 'studid', 'rollnum', 'enrollmentno', 'student_id']);
+          const regNo = String(regNoRaw || '').trim().toUpperCase();
           if (!regNo) continue;
 
-          const student = studentMaster.find((s: any) => String(s.regNo).toUpperCase() === regNo);
+          const student = studentMaster.find((s: any) => String(s.regNo || '').trim().toUpperCase() === regNo);
           const existingResult = existingResultsMap[regNo];
           
           let newAnswers: Record<string, string> = {};
@@ -861,11 +896,82 @@ export default function Results() {
         const snap = await getDocs(q);
         allResults.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
-      setResults(allResults);
+
+      // Dynamically fetch and merge up-to-date student details to solve any stale/missing mapping issues!
+      const uniqueRegNos = Array.from(new Set(allResults.map(r => String(r.regNo || '').trim().toUpperCase()).filter(Boolean)));
+      const studentMap: Record<string, any> = {};
+      
+      if (uniqueRegNos.length > 0) {
+        const chunks: string[][] = [];
+        for (let i = 0; i < uniqueRegNos.length; i += 30) {
+          chunks.push(uniqueRegNos.slice(i, i + 30));
+        }
+        
+        try {
+          const studentSnaps = await Promise.all(
+            chunks.map(chunk => getDocs(query(collection(db, 'students'), where('regNo', 'in', chunk))))
+          );
+          studentSnaps.forEach(snap => {
+            snap.docs.forEach(docSnap => {
+              const data = docSnap.data();
+              if (data.regNo) {
+                studentMap[String(data.regNo).trim().toUpperCase()] = { id: docSnap.id, ...data };
+              }
+            });
+          });
+        } catch (studentErr) {
+          console.warn("Failed fetching students dynamically for results merging:", studentErr);
+        }
+      }
+
+      // Now, merge the fresh student details on the fly!
+      const mergedResults = allResults.map(res => {
+        const key = String(res.regNo || '').trim().toUpperCase();
+        const studentInfo = studentMap[key];
+        
+        if (studentInfo) {
+          // Resolve batch and center names using cached metadata
+          const batchId = studentInfo.batchId || res.batchId;
+          const centerId = studentInfo.centerId || res.centerId;
+          const programId = studentInfo.programId || res.programId;
+          
+          const batchDetail = batchId ? metaBatches.find(b => b.id === batchId) : null;
+          const centerDetail = centerId ? metaCenters.find(c => c.id === centerId) : null;
+          const programDetail = programId ? metaPrograms.find(p => p.id === programId) : null;
+          
+          return {
+            ...res,
+            studentName: studentInfo.name || res.studentName,
+            phone: studentInfo.phone || res.phone,
+            email: studentInfo.email || res.email,
+            centerId: centerId || res.centerId,
+            centerName: centerDetail?.centerName || res.centerName,
+            batchId: batchId || res.batchId,
+            batchName: batchDetail?.batchName || res.batchName,
+            batchCode: studentInfo.batchCode || batchDetail?.batchCode || res.batchCode,
+            programId: programId || res.programId,
+            programName: programDetail?.programName || res.programName,
+          };
+        } else {
+          // If no student document exists but ids are in result, still map batch/center names dynamically from cached metadata if possible!
+          const batchDetail = res.batchId ? metaBatches.find(b => b.id === res.batchId) : null;
+          const centerDetail = res.centerId ? metaCenters.find(c => c.id === res.centerId) : null;
+          const programDetail = res.programId ? metaPrograms.find(p => p.id === res.programId) : null;
+          
+          return {
+            ...res,
+            batchName: batchDetail?.batchName || res.batchName,
+            centerName: centerDetail?.centerName || res.centerName,
+            programName: programDetail?.programName || res.programName,
+          };
+        }
+      });
+
+      setResults(mergedResults);
       
       // Keep selectedResult in sync if it's currently open
       if (selectedResult) {
-        const updated = allResults.find(r => r.id === selectedResult.id);
+        const updated = mergedResults.find(r => r.id === selectedResult.id);
         if (updated) setSelectedResult(updated);
       }
     } catch (err) {
@@ -1147,21 +1253,41 @@ export default function Results() {
             </div>
           </Card>
         );
-      })() : (
-        <div className="py-12 bg-white rounded-[2.5rem] border border-dashed border-slate-200 flex flex-col items-center justify-center text-center p-8 space-y-4">
-           <div className="p-5 bg-slate-50 rounded-[2rem] text-slate-300">
-             <Target size={40} />
-           </div>
-           <div>
-             <p className="font-black text-slate-900 tracking-tight">Select a test to view results</p>
-             <p className="text-xs text-slate-400 mt-1">Pick a test from the filter menu to see student performance</p>
-           </div>
-           <Button onClick={() => setIsFilterOpen(true)} size="sm">Select Test Now</Button>
-        </div>
-      )}
+      })() : null}
 
       {selectedTestIds.length > 0 ? (
-        <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
+        <>
+          {(wizardProgramId || wizardBatchId) && (
+            <div className="mb-6 bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-3 text-sm font-bold text-slate-600">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2.5 py-1 rounded-lg">Active Context</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">Division:</span>
+                  <span className="text-slate-900 font-black">{metaPrograms.find(p => p.id === wizardProgramId)?.programName || '—'}</span>
+                </div>
+                <div className="w-1 h-1 bg-slate-300 rounded-full" />
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">Class:</span>
+                  <span className="text-slate-900 font-black">{metaBatches.find(b => b.id === wizardBatchId)?.batchName || '—'}</span>
+                </div>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => {
+                  setWizardProgramId('');
+                  setWizardBatchId('');
+                  setSelectedTestIds([]);
+                  setResults([]);
+                  setFilters(prev => ({ ...prev, programId: '', batchId: '' }));
+                }} 
+                className="text-xs text-rose-600 font-black hover:bg-rose-50 hover:text-rose-700 px-3 py-1.5 h-auto rounded-xl"
+              >
+                Change Division/Class
+              </Button>
+            </div>
+          )}
+          <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
           <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-left border-collapse min-w-[1400px]">
               <thead className="bg-slate-50/50">
@@ -1350,16 +1476,198 @@ export default function Results() {
             </table>
           </div>
         </Card>
+        </>
       ) : (
-        <div className="py-12 bg-white rounded-[2.5rem] border border-dashed border-slate-200 flex flex-col items-center justify-center text-center p-8 space-y-4">
-           <div className="p-5 bg-slate-50 rounded-[2rem] text-slate-300">
-             <Target size={40} />
+        <div className="bg-white rounded-[2.5rem] border border-slate-100 p-8 md:p-12 shadow-sm space-y-8 animate-fade-in">
+           {/* Header */}
+           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-b border-slate-50 pb-8">
+              <div>
+                 <Badge variant="blue" className="text-[10px] font-black uppercase tracking-widest px-3 py-1 bg-blue-50 text-blue-600 border-none mb-3">
+                    Result Analysis Flow
+                 </Badge>
+                 <h2 className="text-3xl font-black text-slate-900 tracking-tight">
+                    Select Tests for Analysis
+                 </h2>
+                 <p className="text-sm text-slate-400 font-bold mt-1">
+                    Select one or more test series below to trigger comparative analytics and combined scoreboard views.
+                 </p>
+              </div>
+              <div className="flex items-center gap-3 self-start md:self-auto">
+                 <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                       const visibleIds = wizardFilteredTests.map((t: any) => t.id);
+                       const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedTestIds.includes(id));
+                       if (allSelected) {
+                          const next = selectedTestIds.filter(id => !visibleIds.includes(id));
+                          setSelectedTestIds(next);
+                          fetchResults(next);
+                       } else {
+                          const next = Array.from(new Set([...selectedTestIds, ...visibleIds]));
+                          setSelectedTestIds(next);
+                          fetchResults(next);
+                       }
+                    }}
+                    className="border-slate-200 font-bold text-xs rounded-xl h-10 px-4"
+                    disabled={wizardFilteredTests.length === 0}
+                 >
+                    {wizardFilteredTests.length > 0 && wizardFilteredTests.every((t: any) => selectedTestIds.includes(t.id)) 
+                       ? 'Deselect All Filtered' 
+                       : 'Select All Filtered'}
+                 </Button>
+              </div>
            </div>
-           <div>
-             <p className="font-black text-slate-900 tracking-tight">Select a test to view results</p>
-             <p className="text-xs text-slate-400 mt-1">Pick a test from the filter menu to see student performance</p>
+
+           {/* Filter controls */}
+           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="relative group">
+                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={16} />
+                 <Input 
+                    type="text"
+                    placeholder="Search test by name or pattern..." 
+                    value={testSearchQuery}
+                    onChange={e => setTestSearchQuery(e.target.value)}
+                    className="pl-11 rounded-2xl border-slate-100 bg-slate-50 focus:bg-white text-sm font-bold h-12"
+                 />
+              </div>
+
+              <div>
+                 <Select 
+                    value={wizardProgramId} 
+                    onChange={e => {
+                       setWizardProgramId(e.target.value);
+                       setWizardBatchId(''); // reset batch when program changes
+                    }}
+                    className="rounded-2xl border-slate-100 bg-slate-50 text-sm font-bold h-12 w-full"
+                 >
+                    <option value="">All Divisions (Programs)</option>
+                    {metaPrograms.map(p => (
+                       <option key={p.id} value={p.id}>{p.programName}</option>
+                    ))}
+                 </Select>
+              </div>
+
+              <div>
+                 <Select 
+                    value={wizardBatchId} 
+                    onChange={e => setWizardBatchId(e.target.value)}
+                    className="rounded-2xl border-slate-100 bg-slate-50 text-sm font-bold h-12 w-full"
+                 >
+                    <option value="">All Class Batches</option>
+                    {wizardFilteredBatches.map(b => (
+                       <option key={b.id} value={b.id}>{b.batchName}</option>
+                    ))}
+                 </Select>
+              </div>
            </div>
-           <Button onClick={() => setIsFilterOpen(true)} size="sm">Select Test Now</Button>
+
+           {/* Tests Grid */}
+           <div className="space-y-6">
+              {wizardFilteredTests.length > 0 ? (
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto pr-2 no-scrollbar">
+                    {wizardFilteredTests.map((t: any) => {
+                       const isSelected = selectedTestIds.includes(t.id);
+                       return (
+                          <button
+                             key={t.id}
+                             onClick={() => {
+                                handleTestToggle(t.id);
+                             }}
+                             className={cn(
+                                "group text-left p-6 rounded-[2rem] border-2 transition-all outline-none flex flex-col justify-between h-48 relative overflow-hidden",
+                                isSelected 
+                                   ? "border-blue-600 bg-blue-50/20 ring-4 ring-blue-50/50" 
+                                   : "border-slate-100 hover:border-blue-400 hover:bg-blue-50/10 bg-white"
+                             )}
+                          >
+                             <div className="flex items-center justify-between w-full">
+                                <div className={cn(
+                                   "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors duration-300",
+                                   isSelected ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
+                                )}>
+                                   <Award size={22} strokeWidth={2.5} />
+                                </div>
+                                {isSelected ? (
+                                   <CheckCircle2 size={24} className="text-blue-600 fill-blue-50 animate-bounce-short" strokeWidth={2.5} />
+                                ) : (
+                                   <div className="w-6 h-6 rounded-full border border-slate-200 flex items-center justify-center group-hover:border-blue-400 transition-colors">
+                                      <div className="w-2.5 h-2.5 rounded-full bg-transparent group-hover:bg-blue-100 transition-colors" />
+                                   </div>
+                                )}
+                             </div>
+                             <div>
+                                <h4 className="font-black text-slate-900 group-hover:text-blue-700 transition-colors leading-tight line-clamp-2">
+                                   {t.name}
+                                </h4>
+                                <div className="flex items-center gap-2 mt-2">
+                                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest bg-slate-100/60 px-2 py-1 rounded-lg">
+                                      {t.date}
+                                   </span>
+                                   <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded-lg">
+                                      {t.pattern?.replace('_', ' ')}
+                                   </span>
+                                </div>
+                             </div>
+                          </button>
+                       );
+                    })}
+                 </div>
+              ) : (
+                 <div className="py-16 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
+                       <BarChart3 size={24} />
+                    </div>
+                    <div className="space-y-1">
+                       <p className="text-slate-800 font-black text-lg">No matching test records found</p>
+                       <p className="text-sm text-slate-400 font-bold">Try clearing filters or adjusting your search keywords.</p>
+                    </div>
+                    {(wizardProgramId || wizardBatchId || testSearchQuery) && (
+                       <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => { setWizardProgramId(''); setWizardBatchId(''); setTestSearchQuery(''); }} 
+                          className="border-slate-200"
+                       >
+                          Reset Filters
+                       </Button>
+                    )}
+                 </div>
+              )}
+
+              {/* Action Banner for selected tests */}
+              {selectedTestIds.length > 0 && (
+                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-6 bg-blue-50 border border-blue-100 rounded-[2rem] animate-fade-in mt-8">
+                    <div className="flex items-center gap-3">
+                       <div className="w-10 h-10 rounded-2xl bg-blue-600 flex items-center justify-center text-white font-black text-sm">
+                          {selectedTestIds.length}
+                       </div>
+                       <div>
+                          <h4 className="font-black text-slate-950 text-sm">Multiple Tests Selected</h4>
+                          <p className="text-xs text-slate-500 font-bold">Compare performance trends, standard deviations, and topic metrics.</p>
+                       </div>
+                    </div>
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                       <Button 
+                          variant="outline" 
+                          onClick={() => { setSelectedTestIds([]); setResults([]); }}
+                          className="border-blue-100 text-blue-700 bg-white hover:bg-blue-50 text-xs font-bold rounded-xl h-11 px-4 w-full sm:w-auto"
+                       >
+                          Clear Selection
+                       </Button>
+                       <Button 
+                          variant="primary" 
+                          onClick={() => {
+                             setView('analytics');
+                          }}
+                          className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl h-11 px-6 shadow-md shadow-blue-200 w-full sm:w-auto"
+                       >
+                          Analyze Selected Tests →
+                       </Button>
+                    </div>
+                 </div>
+              )}
+           </div>
         </div>
       )}
 
@@ -1634,11 +1942,12 @@ export default function Results() {
                       <Input 
                         placeholder="Enter Student Reg No."
                         value={manualData.regNo}
-                        onChange={async (e) => {
+                        onChange={(e) => {
                           const val = e.target.value.toUpperCase();
                           setManualData({ ...manualData, regNo: val });
-                          
-                          // Auto-fetch student if exists
+                        }}
+                        onBlur={async () => {
+                          const val = manualData.regNo.trim();
                           if (val.length >= 3) {
                             try {
                               const q = query(collection(db, 'students'), where('regNo', '==', val));
@@ -1647,7 +1956,6 @@ export default function Results() {
                                 const sData = snap.docs[0].data();
                                 setManualData(prev => ({
                                   ...prev,
-                                  regNo: val,
                                   name: sData.name || prev.name,
                                   phone: sData.phone || prev.phone,
                                   email: sData.email || prev.email

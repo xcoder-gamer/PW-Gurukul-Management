@@ -33,6 +33,16 @@ import { toast } from 'sonner';
 import { addLog, LogAction, LogCategory } from '../lib/logs';
 import { useAuth } from '../context/AuthContext';
 
+// Simple module-level caching for students to prevent repetitive Firestore scans
+let cachedStudents: any[] | null = null;
+let lastFetchedTime: number = 0;
+const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes client cache
+
+export const invalidateStudentCache = () => {
+  cachedStudents = null;
+  lastFetchedTime = 0;
+};
+
 export default function Students() {
   const { user, role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
@@ -85,8 +95,8 @@ export default function Students() {
   });
 
   useEffect(() => {
-    fetchStudents();
-  }, []);
+    fetchStudents(true);
+  }, [filters.batch]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -95,12 +105,34 @@ export default function Students() {
     }
   }, []);
 
-  const fetchStudents = async () => {
+  const fetchStudents = async (forceUpdate = false) => {
+    if (!filters.batch) {
+      setStudents([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const q = query(collection(db, 'students'), orderBy('createdAt', 'desc'), limit(100));
+      const q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
       const snap = await getDocs(q);
-      setStudents(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+
+      // Deduplicate unique students based on registration number and student name
+      const seen = new Set();
+      const uniqueStudents: any[] = [];
+      for (const s of fetched) {
+        const normReg = String(s.regNo || s.regno || s.id || '').trim().toUpperCase();
+        const normName = String(s.name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        const key = `${normReg}_${normName}`;
+        if (normReg || normName) {
+          if (!seen.has(key)) {
+            seen.add(key);
+            uniqueStudents.push(s);
+          }
+        }
+      }
+      setStudents(uniqueStudents);
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'students');
     } finally {
@@ -145,7 +177,7 @@ export default function Students() {
         rankTarget: '',
         targetYear: ''
       });
-      fetchStudents();
+      fetchStudents(true);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'students');
     }
@@ -277,7 +309,7 @@ export default function Students() {
         });
 
         setIsUploadModalOpen(false);
-        fetchStudents();
+        fetchStudents(true);
       } else {
         toast.error('No valid records found to process.');
       }
@@ -359,112 +391,266 @@ export default function Students() {
         </div>
       </header>
 
-      <div className="flex flex-col md:flex-row gap-6">
-        <div className="flex-1 relative">
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-          <Input 
-            placeholder="Search by name, registration number or email..." 
-            value={search} 
-            onChange={e => setSearch(e.target.value)}
-            className="pl-14 py-8 rounded-2xl text-lg font-bold border-slate-100 focus:border-blue-400 transition-all bg-white shadow-sm"
-          />
-        </div>
-        <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl h-auto px-6 whitespace-nowrap">
-          <Filter size={18} className="mr-2" />
-          Advanced Filters
-        </Button>
-      </div>
+      {filters.batch ? (
+        <>
+          {/* Active Batch View Header */}
+          <div className="bg-blue-50/40 p-6 rounded-[2rem] border border-blue-100/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100/50">
+                <GraduationCap size={24} />
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Active Batch View</p>
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                  {batches.find(b => b.id === filters.batch)?.batchName || 'Selected Batch'}
+                </h2>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-500 font-bold">
+                  <span>Code: <span className="text-slate-700">{batches.find(b => b.id === filters.batch)?.batchCode || '—'}</span></span>
+                  <span>•</span>
+                  <span>Program: <span className="text-slate-700">{programs.find(p => p.id === batches.find(b => b.id === filters.batch)?.programId)?.programName || '—'}</span></span>
+                  <span>•</span>
+                  <span>Center: <span className="text-slate-700">{centers.find(c => c.id === batches.find(b => b.id === filters.batch)?.centerId)?.centerName || '—'}</span></span>
+                </div>
+              </div>
+            </div>
+            <Button 
+              variant="outline" 
+              size="md" 
+              onClick={() => {
+                setFilters({ ...filters, batch: '' });
+                setSearch('');
+              }} 
+              className="bg-white border-slate-200 hover:bg-slate-50 font-black text-slate-700 rounded-xl px-5"
+            >
+              ← Back to All Batches
+            </Button>
+          </div>
 
-      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50 border-b border-slate-100">
-                <th className="px-8 py-5 text-left w-10">
-                  <input 
-                    type="checkbox" 
-                    className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    checked={filteredStudents.length > 0 && selectedIds.length === filteredStudents.length}
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Details</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Reg No.</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Student Name</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gender</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Batch Code</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Center</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Program</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Type</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Rank Target</th>
-                <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Target Year</th>
-                <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isAdmin ? 'Action' : 'View'}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {loading ? (
-                Array(6).fill(0).map((_, i) => (
-                  <tr key={i} className="animate-pulse">
-                    <td colSpan={11} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex-1 relative">
+              <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+              <Input 
+                placeholder="Search students in this batch by name or registration number..." 
+                value={search} 
+                onChange={e => setSearch(e.target.value)}
+                className="pl-14 py-8 rounded-2xl text-lg font-bold border-slate-100 focus:border-blue-400 transition-all bg-white shadow-sm"
+              />
+            </div>
+            <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl h-auto px-6 whitespace-nowrap">
+              <Filter size={18} className="mr-2" />
+              Advanced Filters
+            </Button>
+          </div>
+
+          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-100">
+                    <th className="px-8 py-5 text-left w-10">
+                      <input 
+                        type="checkbox" 
+                        className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        checked={filteredStudents.length > 0 && selectedIds.length === filteredStudents.length}
+                        onChange={toggleSelectAll}
+                      />
+                    </th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Details</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Reg No.</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Student Name</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gender</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Batch Code</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Center</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Program</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Type</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Rank Target</th>
+                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Target Year</th>
+                    <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isAdmin ? 'Action' : 'View'}</th>
                   </tr>
-                ))
-              ) : filteredStudents.length === 0 ? (
-                <tr>
-                  <td colSpan={11} className="py-20 text-center space-y-4">
-                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-230">
-                       <User size={40} />
-                    </div>
-                    <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No students found</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredStudents.map(student => (
-                    <StudentRow 
-                      key={student.id} 
-                      student={student} 
-                      isAdmin={isAdmin}
-                      selected={selectedIds.includes(student.id)}
-                      onSelect={(e: React.MouseEvent) => toggleSelect(student.id, e)}
-                      onClick={setSelectedStudent}
-                      onEditClick={(s: any) => {
-                        setSelectedStudent(s);
-                        setIsEditMode(true);
-                      }}
-                      onDeleteClick={async (s: any) => {
-                        const isInactive = s.status === 'inactive';
-                        const action = isInactive ? 'permanently delete' : 'archive';
-                        const message = isInactive 
-                          ? `Are you sure you want to PERMANENTLY delete ${s.name} from Firebase? This cannot be undone.`
-                          : `Are you sure you want to archive ${s.name}? The record will remain in Firebase but will be hidden from the active list.`;
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {loading ? (
+                    Array(6).fill(0).map((_, i) => (
+                      <tr key={i} className="animate-pulse">
+                        <td colSpan={11} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
+                      </tr>
+                    ))
+                  ) : filteredStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} className="py-20 text-center space-y-4">
+                        <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">
+                           <User size={40} />
+                        </div>
+                        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No students found in this batch</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStudents.map(student => (
+                        <StudentRow 
+                          key={student.id} 
+                          student={student} 
+                          isAdmin={isAdmin}
+                          selected={selectedIds.includes(student.id)}
+                          onSelect={(e: React.MouseEvent) => toggleSelect(student.id, e)}
+                          onClick={setSelectedStudent}
+                          onEditClick={(s: any) => {
+                            setSelectedStudent(s);
+                            setIsEditMode(true);
+                          }}
+                          onDeleteClick={async (s: any) => {
+                            const isInactive = s.status === 'inactive';
+                            const action = isInactive ? 'permanently delete' : 'archive';
+                            const message = isInactive 
+                              ? `Are you sure you want to PERMANENTLY delete ${s.name} from Firebase? This cannot be undone.`
+                              : `Are you sure you want to archive ${s.name}? The record will remain in Firebase but will be hidden from the active list.`;
 
-                        if (confirm(message)) {
-                          setLoading(true);
-                          try {
-                            if (isInactive) {
-                              await deleteDoc(doc(db, 'students', s.id));
-                              toast.success('Student permanently deleted');
-                            } else {
-                              await updateDoc(doc(db, 'students', s.id), { status: 'inactive' });
-                              toast.success('Student archived successfully');
+                            if (confirm(message)) {
+                              setLoading(true);
+                              try {
+                                if (isInactive) {
+                                  await deleteDoc(doc(db, 'students', s.id));
+                                  toast.success('Student permanently deleted');
+                                } else {
+                                  await updateDoc(doc(db, 'students', s.id), { status: 'inactive' });
+                                  toast.success('Student archived successfully');
+                                }
+                                fetchStudents(true);
+                              } catch (err) {
+                                handleFirestoreError(err, OperationType.WRITE, 'students_row_delete');
+                              } finally {
+                                setLoading(false);
+                              }
                             }
-                            fetchStudents();
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.WRITE, 'students_row_delete');
-                          } finally {
-                            setLoading(false);
-                          }
-                        }
-                      }}
-                      programName={programs.find(p => p.id === student.programId)?.programName || student.programId}
-                      centerName={centers.find(c => c.id === student.centerId)?.centerName || student.centerId}
-                      batchName={batches.find(b => b.id === student.batchId)?.batchName || student.batchId}
-                    />
-                ))
+                          }}
+                          programName={programs.find(p => p.id === student.programId)?.programName || student.programId}
+                          centerName={centers.find(c => c.id === student.centerId)?.centerName || student.centerId}
+                          batchName={batches.find(b => b.id === student.batchId)?.batchName || student.batchId}
+                        />
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      ) : (
+        /* Batch Browser Mode (Dynamic Firestore Fetch Minimizer!) */
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center bg-slate-50/50 p-4 rounded-3xl border border-slate-100">
+            <div className="flex items-center gap-2 px-2">
+              <Filter size={16} className="text-slate-400" />
+              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Browse by</span>
+            </div>
+            
+            <div className="flex flex-wrap gap-4 items-center flex-1">
+              <Select 
+                value={filters.program} 
+                onChange={e => setFilters({ ...filters, program: e.target.value })}
+                className="w-full sm:w-auto h-11 py-1 px-4 text-xs font-bold rounded-xl border border-slate-100 bg-white"
+              >
+                <option value="">All Programs</option>
+                {programs.filter(p => p.isActive).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+              </Select>
+
+              <Select 
+                value={filters.center} 
+                onChange={e => setFilters({ ...filters, center: e.target.value })}
+                className="w-full sm:w-auto h-11 py-1 px-4 text-xs font-bold rounded-xl border border-slate-100 bg-white"
+              >
+                <option value="">All Centers</option>
+                {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+              </Select>
+
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                <input 
+                  type="text"
+                  placeholder="Type to find batch..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full h-11 pl-9 pr-4 py-2 text-xs font-bold rounded-xl border border-slate-100 bg-white focus:outline-none focus:border-blue-400"
+                />
+              </div>
+
+              {(filters.program || filters.center || search) && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    setFilters({ ...filters, program: '', center: '' });
+                    setSearch('');
+                  }}
+                  className="text-rose-500 font-bold hover:bg-rose-50 rounded-xl"
+                >
+                  Clear Filters
+                </Button>
               )}
-            </tbody>
-          </table>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pl-1">
+            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Select Batch to View Student Details</h2>
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+              {batches.filter(b => b.isActive).length} Available Batches
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {batches
+              .filter(b => {
+                const matchesProgram = !filters.program || b.programId === filters.program;
+                const matchesCenter = !filters.center || b.centerId === filters.center;
+                const matchesSearch = !search || 
+                  (b.batchName || '').toLowerCase().includes(search.toLowerCase()) || 
+                  (b.batchCode || '').toLowerCase().includes(search.toLowerCase());
+                return b.isActive && matchesProgram && matchesCenter && matchesSearch;
+              })
+              .map(batch => {
+                const programName = programs.find(p => p.id === batch.programId)?.programName || '—';
+                const centerName = centers.find(c => c.id === batch.centerId)?.centerName || '—';
+                return (
+                  <div 
+                    key={batch.id} 
+                    onClick={() => {
+                      setSearch('');
+                      setFilters({ ...filters, batch: batch.id });
+                    }}
+                    className="bg-white p-6 rounded-[2rem] border border-slate-100 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-50/10 cursor-pointer transition-all duration-300 flex flex-col justify-between group h-44 relative overflow-hidden"
+                  >
+                    <div className="absolute right-0 top-0 w-24 h-24 bg-blue-50/30 rounded-bl-full group-hover:bg-blue-50/50 transition-colors -z-0 pointer-events-none" />
+                    <div className="space-y-2 z-10">
+                      <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md uppercase tracking-wider">{batch.batchCode || 'No Code'}</span>
+                      <h3 className="text-xl font-black text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors pt-1">{batch.batchName}</h3>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between text-xs text-slate-500 z-10">
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-slate-400">Prog: <span className="text-slate-600">{programName}</span></p>
+                        <p className="font-bold text-slate-400">Center: <span className="text-slate-600">{centerName}</span></p>
+                      </div>
+                      <div className="w-9 h-9 rounded-xl bg-slate-50 group-hover:bg-blue-600 group-hover:text-white transition-all flex items-center justify-center">
+                        <ChevronRight size={18} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+            {batches.filter(b => {
+              const matchesProgram = !filters.program || b.programId === filters.program;
+              const matchesCenter = !filters.center || b.centerId === filters.center;
+              const matchesSearch = !search || 
+                (b.batchName || '').toLowerCase().includes(search.toLowerCase()) || 
+                (b.batchCode || '').toLowerCase().includes(search.toLowerCase());
+              return b.isActive && matchesProgram && matchesCenter && matchesSearch;
+            }).length === 0 && (
+              <div className="col-span-full bg-white rounded-[2rem] border border-slate-100 py-16 text-center space-y-3">
+                <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">No matching batches found</p>
+                <p className="text-slate-500 text-sm font-medium">Try adjusting your Quick Browse filters or search term.</p>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <AnimatePresence>
         {selectedIds.length > 0 && (
@@ -535,7 +721,7 @@ export default function Students() {
 
                           toast.success(`Archived ${selectedIds.length} students`);
                           setSelectedIds([]);
-                          fetchStudents();
+                          fetchStudents(true);
                         } catch (err) {
                           console.error('Bulk archive error:', err);
                           handleFirestoreError(err, OperationType.WRITE, 'students_bulk_archive');
@@ -589,7 +775,7 @@ export default function Students() {
 
                           toast.success(`Successfully deleted ${selectedIds.length} students from Firebase`, { id: toastId });
                           setSelectedIds([]);
-                          await fetchStudents();
+                          await fetchStudents(true);
                           console.log('Bulk delete finished successfully');
                         } catch (err) {
                           console.error('CRITICAL: Bulk delete failed', err);
@@ -666,7 +852,7 @@ export default function Students() {
                     toast.success('Student archived successfully');
                   }
                   setSelectedStudent(null);
-                  fetchStudents();
+                  fetchStudents(true);
                 } catch (err) {
                   handleFirestoreError(err, OperationType.WRITE, 'students_profile_delete');
                 }
@@ -691,7 +877,7 @@ export default function Students() {
 
                 setSelectedStudent({ ...selectedStudent, ...updatedData });
                 setIsEditMode(false);
-                fetchStudents();
+                fetchStudents(true);
                 toast.success('Student updated successfully');
               } catch (err) {
                 handleFirestoreError(err, OperationType.WRITE, 'students_update');

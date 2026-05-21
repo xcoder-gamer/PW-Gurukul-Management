@@ -557,7 +557,7 @@ export default function Tests() {
       toast.success(isDraft ? `Draft saved successfully! (Version ${nextVersion})` : `Test activated successfully! (Version ${nextVersion})`);
       
       // Refresh list and reset
-      const testSnap = await getDocs(collection(db, 'tests'));
+      const testSnap = await getDocs(query(collection(db, 'tests'), limit(150)));
       setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
         const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
         const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
@@ -606,7 +606,7 @@ export default function Tests() {
       await deleteDoc(doc(db, 'tests', testId));
       toast.success('Test deleted permanently');
       
-      const testSnap = await getDocs(collection(db, 'tests'));
+      const testSnap = await getDocs(query(collection(db, 'tests'), limit(150)));
       setTests(sortTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'tests');
@@ -629,7 +629,7 @@ export default function Tests() {
       toast.success(`${selectedTestIds.length} tests deleted permanently`);
       setSelectedTestIds([]);
       
-      const testSnap = await getDocs(collection(db, 'tests'));
+      const testSnap = await getDocs(query(collection(db, 'tests'), limit(150)));
       setTests(sortTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any))));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, 'tests_bulk');
@@ -1174,7 +1174,7 @@ export default function Tests() {
       
       toast.success('All tests synced with QBG Library');
       // Refresh list
-      const testSnap = await getDocs(collection(db, 'tests'));
+      const testSnap = await getDocs(query(collection(db, 'tests'), limit(150)));
       setTests(testSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => {
         const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
         const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
