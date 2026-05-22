@@ -16,7 +16,7 @@ import {
   Download,
   Upload
 } from 'lucide-react';
-import { db } from '../../lib/firebase';
+import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { cn } from '../../lib/utils';
 import * as XLSX from 'xlsx';
 import { addLog, LogAction, LogCategory } from '../../lib/logs';
@@ -32,7 +32,9 @@ import {
   query, 
   where, 
   orderBy, 
-  Timestamp 
+  Timestamp,
+  deleteDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -395,14 +397,14 @@ export default function Masters() {
   const hardDeleteItem = async (id: string) => {
     if (!window.confirm('CRITICAL: This will PERMANENTLY delete this record from the database. This CANNOT be undone. Are you sure?')) return;
     try {
-      const { deleteDoc: fsDelete, doc: fsDoc } = await import('firebase/firestore');
-      await fsDelete(fsDoc(db, config.collection, id));
+      await deleteDoc(doc(db, config.collection, id));
       
       toast.success('Record permanently deleted');
       fetchItems();
     } catch (error) {
       console.error('Error deleting item:', error);
       toast.error('Failed to delete record');
+      handleFirestoreError(error, OperationType.DELETE, `${config.collection}/${id}`);
     }
   };
 
@@ -431,26 +433,45 @@ export default function Masters() {
     if (!window.confirm(`Are you sure you want to PERMANENTLY delete ${selectedIds.length} records? This action cannot be undone.`)) return;
     
     setLoading(true);
+    const toastId = toast.loading(`Deleting ${selectedIds.length} records...`);
     try {
-      const { writeBatch, doc: fsDoc } = await import('firebase/firestore');
       const chunks = [];
-      const CHUNK_SIZE = 450;
+      const CHUNK_SIZE = 15; // smaller chunk size for parallel deletion requests to prevent hitting rate limits
       for (let i = 0; i < selectedIds.length; i += CHUNK_SIZE) {
         chunks.push(selectedIds.slice(i, i + CHUNK_SIZE));
       }
 
       for (const chunk of chunks) {
-        const batch = writeBatch(db);
-        chunk.forEach(id => batch.delete(fsDoc(db, config.collection, id)));
-        await batch.commit();
+        await Promise.all(
+          chunk.map(id => deleteDoc(doc(db, config.collection, id)))
+        );
       }
 
-      toast.success(`${selectedIds.length} records deleted`);
+      const categoryMapping: Record<string, LogCategory> = {
+        programs: LogCategory.PROGRAM,
+        centers: LogCategory.CENTER,
+        batches: LogCategory.BATCH,
+        qbg: LogCategory.QBG,
+        students: LogCategory.STUDENT
+      };
+
+      await addLog({
+        userId: user?.uid || 'system',
+        userEmail: user?.email || 'unknown',
+        action: LogAction.DELETE,
+        category: categoryMapping[type] || LogCategory.AUTH,
+        resourceId: 'bulk',
+        resourceName: 'Bulk Delete',
+        details: `Permanently deleted ${selectedIds.length} records from ${type} master`,
+      });
+
+      toast.success(`${selectedIds.length} records deleted`, { id: toastId });
       setSelectedIds([]);
       fetchItems();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error('Bulk deletion failed');
+      toast.error(err?.message || 'Bulk deletion failed', { id: toastId });
+      handleFirestoreError(err, OperationType.DELETE, `${config.collection}_bulk`);
     } finally {
       setLoading(false);
     }

@@ -172,7 +172,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     else if (subLower === 'botany') subject = 'Botany';
     else if (subLower === 'zoology') subject = 'Zoology';
     else if (subLower === 'biology') subject = 'Biology';
-    const topic = qbgMap[topicId]?.topic || qData.topic || topicId || '';
+    const topic = (qbgMap || {})[topicId]?.topic || qData.topic || topicId || '';
     const diff = normalizedDifficulty;
 
     if (!chapterStats[chap]) {
@@ -548,9 +548,17 @@ export default function Results() {
     results.forEach(res => {
       if (res.subjectStats) {
         if (Array.isArray(res.subjectStats)) {
-          res.subjectStats.forEach((s: any) => { if (s.name) subjects.add(s.name); });
+          res.subjectStats.forEach((s: any) => { 
+            if (s.name && s.name !== 'N/A' && s.name !== 'NA' && s.name !== '') {
+              subjects.add(s.name); 
+            }
+          });
         } else {
-          Object.keys(res.subjectStats).forEach(sName => subjects.add(sName));
+          Object.keys(res.subjectStats).forEach(sName => {
+            if (sName !== 'N/A' && sName !== 'NA' && sName !== '') {
+              subjects.add(sName);
+            }
+          });
         }
       }
     });
@@ -1042,7 +1050,7 @@ export default function Results() {
         'Correct': res.correct || 0,
         'Wrong': res.wrong || 0,
         'Unattempted': res.blank || 0,
-        'Accuracy %': `${Math.round(res.accuracy)}%`,
+        'Accuracy %': `${Math.round(res.accuracy || 0)}%`,
         'Test Date': res.testDate,
         'Test Name': res.testName
       };
@@ -1419,8 +1427,8 @@ export default function Results() {
                         </td>
                       ))}
                       <td className="px-6 py-5 text-center">
-                        <Badge variant={res.accuracy > 70 ? 'green' : 'blue'} className="text-[9px]">
-                          {res.isAbsent ? '—' : `${Math.round(res.accuracy)}%`}
+                        <Badge variant={(res.accuracy || 0) > 70 ? 'green' : 'blue'} className="text-[9px]">
+                          {res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`}
                         </Badge>
                       </td>
                       <td className="px-6 py-5 text-center">
@@ -2441,7 +2449,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       evaluations.forEach((ev: any) => {
         const sName = ev.subject || 'N/A';
         const cName = ev.chapter || 'N/A';
-        const tName = qbgMap[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
+        const tName = (qbgMap || {})[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
         const dName = ev.difficulty || 'Normal';
         const pName = ev.paper || 'N/A';
 
@@ -4504,7 +4512,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                       const wrong = stats.wrong || 0;
                       const blank = stats.blank || (total - correct - wrong);
                       const attempted = correct + wrong;
-                      const accuracy = Math.round(stats.accuracy);
+                      const accuracy = Math.round(stats.accuracy || 0);
                       
                       return (
                         <tr key={stats.id} className="group hover:bg-slate-50/80 transition-colors">

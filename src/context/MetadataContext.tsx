@@ -68,19 +68,28 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      const fetchCollectionSafely = async (colName: string) => {
+        try {
+          return await getDocs(collection(db, colName));
+        } catch (err) {
+          console.warn(`Could not load master collection "${colName}":`, err);
+          return { docs: [] } as any;
+        }
+      };
+
       const [progSnap, centSnap, batchSnap, patternSnap, qbgSnap] = await Promise.all([
-        getDocs(collection(db, 'programs')),
-        getDocs(collection(db, 'centers')),
-        getDocs(collection(db, 'batches')),
-        getDocs(collection(db, 'testPatterns')),
-        getDocs(collection(db, 'qbgLibrary'))
+        fetchCollectionSafely('programs'),
+        fetchCollectionSafely('centers'),
+        fetchCollectionSafely('batches'),
+        fetchCollectionSafely('testPatterns'),
+        fetchCollectionSafely('qbgLibrary')
       ]);
 
-      const freshProg = progSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const freshCent = centSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const freshBatch = batchSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const freshPattern = patternSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const freshQbg = qbgSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const freshProg = progSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      const freshCent = centSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      const freshBatch = batchSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      const freshPattern = patternSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      const freshQbg = qbgSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as any));
 
       setPrograms(freshProg);
       setCenters(freshCent);
