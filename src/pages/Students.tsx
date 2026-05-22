@@ -42,6 +42,16 @@ const CACHE_DURATION = 15 * 60 * 1000; // 15 minutes client cache
 export const invalidateStudentCache = () => {
   cachedStudents = null;
   lastFetchedTime = 0;
+  try {
+    const cachedKeysStr = sessionStorage.getItem('students_cache_keys') || '[]';
+    const cachedKeys = JSON.parse(cachedKeysStr);
+    cachedKeys.forEach((key: string) => {
+      sessionStorage.removeItem(`students_cache_${key}`);
+    });
+    sessionStorage.removeItem('students_cache_keys');
+  } catch (e) {
+    console.warn("Failed invalidating sessionStorage student cache", e);
+  }
 };
 
 export default function Students() {
@@ -112,7 +122,7 @@ export default function Students() {
   });
 
   useEffect(() => {
-    fetchStudents(true);
+    fetchStudents(false);
   }, [filters.batch, filters.center, filters.program]);
 
   useEffect(() => {
@@ -124,6 +134,25 @@ export default function Students() {
 
   const fetchStudents = async (forceUpdate = false) => {
     setLoading(true);
+    const now = Date.now();
+    const filterKey = `batch_${filters.batch || 'all'}_center_${filters.center || 'all'}_program_${filters.program || 'all'}`;
+
+    if (forceUpdate) {
+      invalidateStudentCache();
+    } else if (lastFetchedTime && (now - lastFetchedTime < CACHE_DURATION)) {
+      try {
+        const cached = sessionStorage.getItem(`students_cache_${filterKey}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          setStudents(parsed);
+          setLoading(false);
+          return;
+        }
+      } catch (e) {
+        console.warn("Failed retrieving student cache:", e);
+      }
+    }
+
     try {
       let q;
       if (filters.batch) {
@@ -154,6 +183,19 @@ export default function Students() {
         }
       }
       setStudents(uniqueStudents);
+
+      try {
+        sessionStorage.setItem(`students_cache_${filterKey}`, JSON.stringify(uniqueStudents));
+        const cachedKeysStr = sessionStorage.getItem('students_cache_keys') || '[]';
+        const cachedKeys = JSON.parse(cachedKeysStr);
+        if (!cachedKeys.includes(filterKey)) {
+          cachedKeys.push(filterKey);
+          sessionStorage.setItem('students_cache_keys', JSON.stringify(cachedKeys));
+        }
+        lastFetchedTime = now;
+      } catch (cacheErr) {
+        console.warn("Could not save to sessionStorage:", cacheErr);
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'students');
     } finally {
