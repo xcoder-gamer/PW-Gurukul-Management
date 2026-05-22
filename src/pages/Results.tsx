@@ -374,6 +374,29 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 export default function Results() {
   const { role } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
+
+  const findBatchSafely = (idOrCode: string, list: any[]) => {
+    if (!idOrCode) return null;
+    const clean = String(idOrCode).trim().toLowerCase();
+    return list.find(b => b.id === idOrCode) ||
+           list.find(b => String(b.batchCode || '').trim().toLowerCase() === clean) ||
+           list.find(b => String(b.batchName || '').trim().toLowerCase() === clean);
+  };
+
+  const findCenterSafely = (idOrCode: string, list: any[]) => {
+    if (!idOrCode) return null;
+    const clean = String(idOrCode).trim().toLowerCase();
+    return list.find(c => c.id === idOrCode) ||
+           list.find(c => String(c.centerName || '').trim().toLowerCase() === clean);
+  };
+
+  const findProgramSafely = (idOrCode: string, list: any[]) => {
+    if (!idOrCode) return null;
+    const clean = String(idOrCode).trim().toLowerCase();
+    return list.find(p => p.id === idOrCode) ||
+           list.find(p => String(p.programName || '').trim().toLowerCase() === clean);
+  };
+
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const canEdit = role === 'admin' || role === 'operator' || role === 'central_team';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
@@ -693,6 +716,10 @@ export default function Results() {
           const batchId = student?.batchId || existingResult?.batchId || '';
           const programId = student?.programId || existingResult?.programId || '';
 
+          const batchDetail = findBatchSafely(batchId, metaBatches);
+          const centerDetail = findCenterSafely(centerId, metaCenters);
+          const programDetail = findProgramSafely(programId, metaPrograms);
+
           const payload = {
             testId: targetTestId,
             testName: test.name || 'Unknown',
@@ -700,13 +727,13 @@ export default function Results() {
             regNo: regNo,
             studentName: student?.name || row.studentName || row.name || existingResult?.studentName || 'Unknown Student',
             testMode: row.testMode?.toLowerCase() === 'online' ? 'online' : (student?.testMode || 'offline'),
-            centerId: centerId,
-            centerName: centerId && centerMapDetails[centerId] ? (centerMapDetails[centerId].centerName || '') : (existingResult?.centerName || ''),
-            batchId: batchId,
-            batchName: batchId && batchMapDetails[batchId] ? (batchMapDetails[batchId].batchName || '') : (existingResult?.batchName || ''),
-            batchCode: student?.batchCode || existingResult?.batchCode || '',
-            programId: programId,
-            programName: programId && progMapDetails[programId] ? (progMapDetails[programId].programName || '') : (existingResult?.programName || ''),
+            centerId: centerDetail?.id || centerId,
+            centerName: centerDetail?.centerName || existingResult?.centerName || '',
+            batchId: batchDetail?.id || batchId,
+            batchName: batchDetail?.batchName || existingResult?.batchName || '',
+            batchCode: student?.batchCode || batchDetail?.batchCode || existingResult?.batchCode || '',
+            programId: programDetail?.id || programId,
+            programName: programDetail?.programName || existingResult?.programName || '',
             phone: student?.phone || row.phone || existingResult?.phone || '',
             email: student?.email || row.email || existingResult?.email || '',
             ...stats,
@@ -773,15 +800,27 @@ export default function Results() {
           if (!resData.studentName || resData.studentName === 'Unknown Student') updates.studentName = student.name;
           if (!resData.centerId && student.centerId) updates.centerId = student.centerId;
           const centerId = updates.centerId || resData.centerId;
-          if (centerId && centerMap[centerId] && !resData.centerName) updates.centerName = centerMap[centerId].centerName;
+          const centerDetail = findCenterSafely(centerId, metaCenters);
+          if (centerId && centerDetail) {
+            updates.centerId = centerDetail.id;
+            if (!resData.centerName) updates.centerName = centerDetail.centerName;
+          }
           
           if (!resData.batchId && student.batchId) updates.batchId = student.batchId;
           const batchId = updates.batchId || resData.batchId;
-          if (batchId && batchMap[batchId] && !resData.batchName) updates.batchName = batchMap[batchId].batchName;
+          const batchDetail = findBatchSafely(batchId, metaBatches);
+          if (batchId && batchDetail) {
+            updates.batchId = batchDetail.id;
+            if (!resData.batchName) updates.batchName = batchDetail.batchName;
+          }
           
           if (!resData.programId && student.programId) updates.programId = student.programId;
           const progId = updates.programId || resData.programId;
-          if (progId && progMap[progId] && !resData.programName) updates.programName = progMap[progId].programName;
+          const programDetail = findProgramSafely(progId, metaPrograms);
+          if (progId && programDetail) {
+            updates.programId = programDetail.id;
+            if (!resData.programName) updates.programName = programDetail.programName;
+          }
           
           if (student.batchCode && !resData.batchCode) updates.batchCode = student.batchCode;
 
@@ -943,28 +982,28 @@ export default function Results() {
           const centerId = studentInfo.centerId || res.centerId;
           const programId = studentInfo.programId || res.programId;
           
-          const batchDetail = batchId ? metaBatches.find(b => b.id === batchId) : null;
-          const centerDetail = centerId ? metaCenters.find(c => c.id === centerId) : null;
-          const programDetail = programId ? metaPrograms.find(p => p.id === programId) : null;
+          const batchDetail = findBatchSafely(batchId, metaBatches);
+          const centerDetail = findCenterSafely(centerId, metaCenters);
+          const programDetail = findProgramSafely(programId, metaPrograms);
           
           return {
             ...res,
             studentName: studentInfo.name || res.studentName,
             phone: studentInfo.phone || res.phone,
             email: studentInfo.email || res.email,
-            centerId: centerId || res.centerId,
+            centerId: centerDetail?.id || centerId,
             centerName: centerDetail?.centerName || res.centerName,
-            batchId: batchId || res.batchId,
+            batchId: batchDetail?.id || batchId,
             batchName: batchDetail?.batchName || res.batchName,
             batchCode: studentInfo.batchCode || batchDetail?.batchCode || res.batchCode,
-            programId: programId || res.programId,
+            programId: programDetail?.id || programId,
             programName: programDetail?.programName || res.programName,
           };
         } else {
           // If no student document exists but ids are in result, still map batch/center names dynamically from cached metadata if possible!
-          const batchDetail = res.batchId ? metaBatches.find(b => b.id === res.batchId) : null;
-          const centerDetail = res.centerId ? metaCenters.find(c => c.id === res.centerId) : null;
-          const programDetail = res.programId ? metaPrograms.find(p => p.id === res.programId) : null;
+          const batchDetail = findBatchSafely(res.batchId, metaBatches);
+          const centerDetail = findCenterSafely(res.centerId, metaCenters);
+          const programDetail = findProgramSafely(res.programId, metaPrograms);
           
           return {
             ...res,
@@ -2134,11 +2173,16 @@ export default function Results() {
                       const studentInfo = studentsSnap.docs[0]?.data() || {};
                       const qbgMap = metaQbgMap;
 
-                      const batchMap = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
-                      const centerMap = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
-
                       // 2. Scoring Logic (Unified)
                       const stats = evaluateResult(manualData.studentAnswers, test.answerKey || {}, qbgMap, test.pattern);
+
+                      const centerId = studentInfo.centerId || '';
+                      const batchId = studentInfo.batchId || '';
+                      const programId = studentInfo.programId || '';
+
+                      const batchDetail = findBatchSafely(batchId, metaBatches);
+                      const centerDetail = findCenterSafely(centerId, metaCenters);
+                      const programDetail = findProgramSafely(programId, metaPrograms);
 
                       const resultPayload = {
                         testId: selectedTestIds[0],
@@ -2147,10 +2191,13 @@ export default function Results() {
                         regNo: manualData.regNo,
                         studentName: manualData.name || studentInfo.name || 'Student (Manual)',
                         testMode: manualData.testMode || studentInfo.testMode || 'offline',
-                        centerId: studentInfo.centerId || '',
-                        centerName: studentInfo.centerId && centerMap[studentInfo.centerId] ? (centerMap[studentInfo.centerId].centerName || '') : '',
-                        batchId: studentInfo.batchId || '',
-                        batchName: batchMap[studentInfo.batchId]?.batchName || '',
+                        centerId: centerDetail?.id || centerId,
+                        centerName: centerDetail?.centerName || '',
+                        batchId: batchDetail?.id || batchId,
+                        batchName: batchDetail?.batchName || '',
+                        batchCode: studentInfo.batchCode || batchDetail?.batchCode || '',
+                        programId: programDetail?.id || programId,
+                        programName: programDetail?.programName || '',
                         phone: manualData.phone || studentInfo.phone || '',
                         email: manualData.email || studentInfo.email || '',
                         ...stats,
@@ -2337,7 +2384,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   onTestToggle?: (id: string) => void,
   onSelectAllTests?: (ids: string[]) => void
 }) {
-  const { qbgMap } = useMetadata();
+  const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student'>('summary');
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
@@ -2345,6 +2392,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [selectedTestModes, setSelectedTestModes] = useState<string[]>([]);
   const [studentSearch, setStudentSearch] = useState(initialSearch);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]); // Array of sKeys (regNo_name)
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
+  const [selectedCenterId, setSelectedCenterId] = useState<string>('');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
 
   useEffect(() => {
     if (initialSearch) {
@@ -2379,6 +2429,15 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     results.forEach(res => {
       // Apply Test Filter
       if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
+
+      // Apply Program/Division Filter
+      if (selectedProgramId && res.programId !== selectedProgramId) return;
+
+      // Apply Center Filter
+      if (selectedCenterId && res.centerId !== selectedCenterId) return;
+
+      // Apply Batch Filter
+      if (selectedBatchId && res.batchId !== selectedBatchId) return;
       
       const sKey = `${res.regNo || 'NOREG'}_${res.studentName}`;
       
@@ -2586,7 +2645,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       studentTable: studentTableList,
       allStudents: allStudentsList 
     };
-  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig]);
+  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig, selectedProgramId, selectedCenterId, selectedBatchId]);
 
   // Derived filter options
   const filterOptions = useMemo(() => {
@@ -2625,8 +2684,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   }, [results, qbgMap, tests]);
 
   const filteredResultsCount = useMemo(() => {
-    return results.filter(r => selectedTestIds.includes(r.testId)).length;
-  }, [results, selectedTestIds]);
+    return aggregateStats?.studentTable?.length || 0;
+  }, [aggregateStats]);
 
   if (!aggregateStats) return (
     <div className="flex flex-col items-center justify-center p-20 space-y-4">
@@ -2887,6 +2946,61 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             className="overflow-hidden"
           >
             <Card className="p-8 border-slate-100 bg-slate-50/50 space-y-8 rounded-[2rem]">
+               {/* Primary Academic Context Dropdowns */}
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-left">
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Division (Program)</label>
+                   <Select 
+                     value={selectedProgramId} 
+                     onChange={e => {
+                       setSelectedProgramId(e.target.value);
+                       setSelectedBatchId('');
+                     }}
+                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
+                   >
+                     <option value="">All Divisions</option>
+                     {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
+                       <option key={p.id} value={p.id}>{p.programName}</option>
+                     ))}
+                   </Select>
+                 </div>
+
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
+                   <Select 
+                     value={selectedCenterId} 
+                     onChange={e => {
+                       setSelectedCenterId(e.target.value);
+                       setSelectedBatchId('');
+                     }}
+                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
+                   >
+                     <option value="">All Centers</option>
+                     {metaCenters.filter((c: any) => c.isActive).map((c: any) => (
+                       <option key={c.id} value={c.id}>{c.centerName}</option>
+                     ))}
+                   </Select>
+                 </div>
+
+                 <div className="space-y-2">
+                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Class Batch</label>
+                   <Select 
+                     value={selectedBatchId} 
+                     onChange={e => setSelectedBatchId(e.target.value)}
+                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
+                   >
+                     <option value="">All Batches</option>
+                     {metaBatches.filter((b: any) => 
+                       b.isActive && 
+                       (!selectedProgramId || b.programId === selectedProgramId) &&
+                       (!selectedCenterId || b.centerId === selectedCenterId)
+                     ).map((b: any) => (
+                       <option key={b.id} value={b.id}>{b.batchName} ({b.batchCode})</option>
+                     ))}
+                   </Select>
+                 </div>
+               </div>
+
                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                   {/* Test Filter */}
                   <div className="space-y-4">
@@ -3074,6 +3188,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     setSelectedChapters([]);
                     setSelectedTopics([]);
                     setSelectedStudents([]);
+                    setSelectedProgramId('');
+                    setSelectedCenterId('');
+                    setSelectedBatchId('');
                   }} className="text-rose-500 hover:text-rose-600">
                     Clear All Filters
                   </Button>

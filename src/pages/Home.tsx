@@ -11,7 +11,7 @@ import { cn } from '../lib/utils';
 
 export default function Home() {
   const { user, role } = useAuth();
-  const { centers: metaCenters, batches: metaBatches } = useMetadata();
+  const { programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
     students: 0,
@@ -22,12 +22,14 @@ export default function Home() {
   });
   const [recentTests, setRecentTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [masters, setMasters] = useState<{ centers: any[], batches: any[], testDates: string[] }>({ centers: [], batches: [], testDates: [] });
+  const [masters, setMasters] = useState<{ programs: any[], centers: any[], batches: any[], testDates: string[] }>({ programs: [], centers: [], batches: [], testDates: [] });
   const [filters, setFilters] = useState<{
+    programIds: string[];
     centerIds: string[];
     batchIds: string[];
     testDates: string[];
   }>({
+    programIds: [],
     centerIds: [],
     batchIds: [],
     testDates: []
@@ -75,15 +77,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const activePrograms = metaPrograms.filter(p => p.isActive !== false);
     const activeCenters = metaCenters.filter(c => c.isActive !== false);
     const activeBatches = metaBatches.filter(b => b.isActive !== false);
 
     setMasters(prev => ({
       ...prev,
+      programs: activePrograms,
       centers: activeCenters,
       batches: activeBatches
     }));
-  }, [metaCenters, metaBatches]);
+  }, [metaPrograms, metaCenters, metaBatches]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -108,16 +112,21 @@ export default function Home() {
         setLoading(true);
         
         let studentQuery = query(collection(db, 'students'));
+        if (filters.programIds.length > 0) studentQuery = query(studentQuery, where('programId', 'in', filters.programIds));
         if (filters.centerIds.length > 0) studentQuery = query(studentQuery, where('centerId', 'in', filters.centerIds));
         if (filters.batchIds.length > 0) studentQuery = query(studentQuery, where('batchId', 'in', filters.batchIds));
 
         let testQuery = query(collection(db, 'tests'));
+        if (filters.programIds.length > 0) {
+          testQuery = query(testQuery, where('programId', 'in', filters.programIds));
+        }
         if (filters.batchIds.length > 0) {
           testQuery = query(testQuery, where('batchIds', 'array-contains-any', filters.batchIds));
         }
         if (filters.testDates.length > 0) testQuery = query(testQuery, where('date', 'in', filters.testDates));
 
         let resultQuery = query(collection(db, 'result_updated'));
+        if (filters.programIds.length > 0) resultQuery = query(resultQuery, where('programId', 'in', filters.programIds));
         if (filters.batchIds.length > 0) resultQuery = query(resultQuery, where('batchId', 'in', filters.batchIds));
         if (filters.centerIds.length > 0) resultQuery = query(resultQuery, where('centerId', 'in', filters.centerIds));
 
@@ -231,7 +240,33 @@ export default function Home() {
             className="overflow-hidden"
           >
             <Card className="p-6 border-slate-100 bg-slate-50/50 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-1">Divisions</label>
+                  <div className="flex flex-wrap gap-2 p-1">
+                    {masters.programs.map(prog => (
+                      <button
+                        key={prog.id}
+                        onClick={() => {
+                          const newIds = filters.programIds.includes(prog.id)
+                            ? filters.programIds.filter(id => id !== prog.id)
+                            : [...filters.programIds, prog.id];
+                          setFilters({ ...filters, programIds: newIds, batchIds: [] });
+                        }}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-[10px] font-black tracking-tight transition-all border shadow-sm",
+                          filters.programIds.includes(prog.id)
+                            ? "bg-blue-600 border-blue-600 text-white"
+                            : "bg-white border-slate-200 text-slate-500 hover:border-blue-300"
+                        )}
+                      >
+                        {prog.programName}
+                      </button>
+                    ))}
+                    {masters.programs.length === 0 && <p className="text-[10px] font-bold text-slate-300 italic">No divisions found</p>}
+                  </div>
+                </div>
+
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-1">Centers</label>
                   <div className="flex flex-wrap gap-2 p-1">
@@ -247,8 +282,8 @@ export default function Home() {
                         className={cn(
                           "px-3 py-1.5 rounded-xl text-[10px] font-black tracking-tight transition-all border shadow-sm",
                           filters.centerIds.includes(center.id)
-                            ? "bg-blue-600 border-blue-600 text-white"
-                            : "bg-white border-slate-200 text-slate-500 hover:border-blue-300"
+                            ? "bg-emerald-600 border-emerald-600 text-white"
+                            : "bg-white border-slate-200 text-slate-500 hover:border-emerald-300"
                         )}
                       >
                         {center.centerName}
@@ -262,7 +297,7 @@ export default function Home() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block px-1">Batches</label>
                   <div className="flex flex-wrap gap-2 p-1 max-h-[120px] overflow-y-auto custom-scrollbar">
                     {masters.batches
-                      .filter(b => filters.centerIds.length === 0 || filters.centerIds.includes(b.centerId))
+                      .filter(b => (filters.centerIds.length === 0 || filters.centerIds.includes(b.centerId)) && (filters.programIds.length === 0 || filters.programIds.includes(b.programId)))
                       .map(batch => (
                       <button
                         key={batch.id}
@@ -314,13 +349,13 @@ export default function Home() {
               </div>
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-200/50">
-                <p className="text-[10px] font-bold text-slate-400 italic italic">
+                <p className="text-[10px] font-bold text-slate-400 italic">
                   * Multi-select enabled. Filtering currently applied to summary stats.
                 </p>
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  onClick={() => setFilters({ centerIds: [], batchIds: [], testDates: [] })}
+                  onClick={() => setFilters({ programIds: [], centerIds: [], batchIds: [], testDates: [] })}
                   className="text-slate-400 hover:text-rose-500 font-bold h-8 px-3 rounded-lg"
                 >
                   <X size={14} className="mr-1" />
