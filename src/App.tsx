@@ -42,7 +42,7 @@ function UnauthorizedPage() {
 import { ShieldAlert, LogOut } from 'lucide-react';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading, role } = useAuth();
+  const { user, loading, role, isQuotaExceeded } = useAuth();
   
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -57,6 +57,20 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen flex bg-[#F8FAFC] selection:bg-blue-100 uppercase-none">
       <Sidebar />
       <div className="flex-1 pb-24 md:pb-8 md:pl-64 overflow-x-hidden transition-all duration-300">
+        {isQuotaExceeded && (
+          <div className="bg-amber-500 text-white font-black text-xs px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md sticky top-0 z-50">
+            <div className="flex items-center gap-2.5">
+              <span className="relative flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-white"></span>
+              </span>
+              <span>Firestore Quota Limits Reached (Free Tier Run Limit). Operated in Cached Offline Mode!</span>
+            </div>
+            <span className="text-[9px] font-black uppercase tracking-widest bg-amber-950/20 px-3 py-1 rounded-lg">
+              Upgrade to Blaze Billing Plan internally to remove daily Caps.
+            </span>
+          </div>
+        )}
         <Suspense fallback={
           <div className="min-h-screen flex items-center justify-center">
             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />

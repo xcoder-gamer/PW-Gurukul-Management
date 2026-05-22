@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, Button } from '../components/UI';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../lib/firebase';
@@ -24,11 +24,13 @@ import {
   Download,
   FileJson,
   FileText,
-  Target
+  Target,
+  Trash2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
+import { toast } from 'sonner';
 
 export default function More() {
   const { user, role, logout } = useAuth();
@@ -37,6 +39,82 @@ export default function More() {
   const [seedStatus, setSeedStatus] = useState<string | null>(null);
 
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+
+  const [counts, setCounts] = useState({ programs: 0, centers: 0, batches: 0 });
+  const [purging, setPurging] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchCounts = async () => {
+      try {
+        const [progSnap, centSnap, batchSnap] = await Promise.all([
+          getDocs(collection(db, 'programs')),
+          getDocs(collection(db, 'centers')),
+          getDocs(collection(db, 'batches'))
+        ]);
+        setCounts({
+          programs: progSnap.size,
+          centers: centSnap.size,
+          batches: batchSnap.size
+        });
+      } catch (err) {
+        console.error("Error loading counts for deletion utility:", err);
+      }
+    };
+    if (isAdmin) {
+      fetchCounts();
+    }
+  }, [isAdmin]);
+
+  const purgeCollection = async (collName: 'programs' | 'centers' | 'batches') => {
+    const labelMap = {
+      programs: 'Academic Programs',
+      centers: 'Centers',
+      batches: 'Batches'
+    };
+    
+    const label = labelMap[collName];
+    
+    const confirm1 = window.confirm(`CRITICAL WARNING: This will PERMANENTLY delete ALL ${label} from the database. This action CANNOT be undone and will impact associated students, tests, and results. Are you absolutely certain you want to proceed?`);
+    if (!confirm1) return;
+    
+    const typedConfirm = window.prompt(`To confirm permanent deletion of ALL ${label}, please type the word "DELETE" in capital letters below:`);
+    if (typedConfirm !== 'DELETE') {
+      toast.error('Deletion cancelled. Incorrect confirmation phrase.');
+      return;
+    }
+    
+    setPurging(collName);
+    try {
+      const querySnapshot = await getDocs(collection(db, collName));
+      if (querySnapshot.empty) {
+        toast.info(`No ${label} records found to delete.`);
+        setPurging(null);
+        return;
+      }
+      
+      const { writeBatch, doc } = await import('firebase/firestore');
+      const docsToDelete = querySnapshot.docs;
+      
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < docsToDelete.length; i += CHUNK_SIZE) {
+        const chunk = docsToDelete.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+        chunk.forEach(docSnap => {
+          batch.delete(doc(db, collName, docSnap.id));
+        });
+        await batch.commit();
+      }
+      
+      toast.success(`Successfully deleted all ${docsToDelete.length} ${label} records permanently.`);
+      
+      setCounts(prev => ({ ...prev, [collName]: 0 }));
+    } catch (err: any) {
+      console.error(`Error purging ${collName}:`, err);
+      toast.error(err.message || `Failed to delete ${label}. Check security permissions.`);
+    } finally {
+      setPurging(null);
+    }
+  };
 
   const downloadStudentTemplate = () => {
     const ws = XLSX.utils.json_to_sheet([
@@ -409,6 +487,74 @@ export default function More() {
           </div>
         </Card>
       </section>
+
+      {isAdmin && (
+        <section className="space-y-4">
+          <h2 className="text-xs font-black text-rose-500 uppercase tracking-[0.2em] px-2">Critical Master Deletion</h2>
+          <Card className="p-6 space-y-4 bg-rose-50/10 border border-rose-100/50 rounded-[2.5rem]">
+            <div className="space-y-1">
+              <h3 className="font-black text-slate-900 text-sm">Permanent Deletion Panel</h3>
+              <p className="text-[10px] uppercase tracking-wider font-extrabold text-rose-500">Warning: Actions here are irreversible</p>
+            </div>
+            
+            <div className="space-y-3">
+              {/* Program Purge */}
+              <div className="flex items-center justify-between p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-slate-100 shadow-sm hover:border-rose-200 transition-all">
+                <div>
+                  <h4 className="font-black text-slate-800 text-xs">Academic Programs</h4>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">{counts.programs} items in system</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => purgeCollection('programs')}
+                  disabled={purging !== null || counts.programs === 0}
+                  className="border-rose-100 hover:bg-rose-50 hover:text-rose-600 text-rose-500 font-bold text-[10px] uppercase tracking-wider rounded-xl h-9 px-3 flex items-center gap-1.5 transition-all"
+                >
+                  <Trash2 size={13} />
+                  {purging === 'programs' ? 'Deleting...' : 'Delete All'}
+                </Button>
+              </div>
+
+              {/* Center Purge */}
+              <div className="flex items-center justify-between p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-slate-100 shadow-sm hover:border-rose-200 transition-all">
+                <div>
+                  <h4 className="font-black text-slate-800 text-xs">Centers</h4>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">{counts.centers} items in system</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => purgeCollection('centers')}
+                  disabled={purging !== null || counts.centers === 0}
+                  className="border-rose-100 hover:bg-rose-50 hover:text-rose-600 text-rose-500 font-bold text-[10px] uppercase tracking-wider rounded-xl h-9 px-3 flex items-center gap-1.5 transition-all"
+                >
+                  <Trash2 size={13} />
+                  {purging === 'centers' ? 'Deleting...' : 'Delete All'}
+                </Button>
+              </div>
+
+              {/* Batch Purge */}
+              <div className="flex items-center justify-between p-4 bg-white/80 backdrop-blur-sm rounded-2xl border border-slate-100 shadow-sm hover:border-rose-200 transition-all">
+                <div>
+                  <h4 className="font-black text-slate-800 text-xs">Batches</h4>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">{counts.batches} items in system</p>
+                </div>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => purgeCollection('batches')}
+                  disabled={purging !== null || counts.batches === 0}
+                  className="border-rose-100 hover:bg-rose-50 hover:text-rose-600 text-rose-500 font-bold text-[10px] uppercase tracking-wider rounded-xl h-9 px-3 flex items-center gap-1.5 transition-all"
+                >
+                  <Trash2 size={13} />
+                  {purging === 'batches' ? 'Deleting...' : 'Delete All'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </section>
+      )}
 
       <section className="space-y-4">
         <h2 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] px-2">Account & System</h2>

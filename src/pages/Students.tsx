@@ -96,7 +96,7 @@ export default function Students() {
 
   useEffect(() => {
     fetchStudents(true);
-  }, [filters.batch]);
+  }, [filters.batch, filters.center, filters.program]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -106,15 +106,19 @@ export default function Students() {
   }, []);
 
   const fetchStudents = async (forceUpdate = false) => {
-    if (!filters.batch) {
-      setStudents([]);
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
     try {
-      const q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
+      let q;
+      if (filters.batch) {
+        q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
+      } else if (filters.center) {
+        q = query(collection(db, 'students'), where('centerId', '==', filters.center), limit(1500));
+      } else if (filters.program) {
+        q = query(collection(db, 'students'), where('programId', '==', filters.program), limit(1500));
+      } else {
+        q = query(collection(db, 'students'), limit(2000));
+      }
+      
       const snap = await getDocs(q);
       const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
 
@@ -363,27 +367,44 @@ export default function Students() {
   return (
     <div className="space-y-6 relative">
       {loading && <Loader fullScreen label="Processing Students..." />}
+      
+      {/* Directory Title and Buttons Header */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-1">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Directory</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] pl-0.5">Directory</p>
           <h1 className="text-4xl font-black text-slate-900 tracking-tight">Students</h1>
           <p className="text-slate-500 font-medium text-sm">
             Manage your student records, batches, and enrollment data.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="outline" size="md" onClick={handleExport} className="border-slate-200">
-             <Download size={18} className="mr-2 text-emerald-600" />
+          <Button 
+            variant="outline" 
+            size="md" 
+            onClick={handleExport} 
+            className="rounded-full border border-slate-200 hover:bg-slate-50 text-blue-600 font-bold text-xs h-11 px-5 flex items-center justify-center gap-2 shadow-sm transition-all bg-white"
+          >
+             <Download size={15} className="text-emerald-600 animate-pulse" />
              Export Data
           </Button>
           {isAdmin && (
             <>
-              <Button variant="outline" size="md" onClick={() => setIsUploadModalOpen(true)} className="border-slate-200">
-                 <Upload size={18} className="mr-2 text-blue-600" />
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={() => setIsUploadModalOpen(true)} 
+                className="rounded-full border border-slate-200 hover:bg-slate-50 text-blue-600 font-bold text-xs h-11 px-5 flex items-center justify-center gap-2 shadow-sm transition-all bg-white"
+              >
+                 <Upload size={15} className="text-blue-500" />
                  Bulk Import
               </Button>
-              <Button variant="primary" size="md" onClick={() => setIsAddModalOpen(true)} className="shadow-lg shadow-blue-100 px-6">
-                 <Plus size={18} className="mr-2" strokeWidth={3} />
+              <Button 
+                variant="primary" 
+                size="md" 
+                onClick={() => setIsAddModalOpen(true)} 
+                className="bg-blue-600 hover:bg-blue-700 text-white rounded-full font-bold text-xs h-11 px-6 flex items-center justify-center gap-1.5 shadow-md shadow-blue-100 transition-all"
+              >
+                 <Plus size={15} strokeWidth={3} />
                  Add Student
               </Button>
             </>
@@ -391,266 +412,175 @@ export default function Students() {
         </div>
       </header>
 
-      {filters.batch ? (
-        <>
-          {/* Active Batch View Header */}
-          <div className="bg-blue-50/40 p-6 rounded-[2rem] border border-blue-100/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-blue-100/50">
-                <GraduationCap size={24} />
-              </div>
-              <div>
-                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest">Active Batch View</p>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                  {batches.find(b => b.id === filters.batch)?.batchName || 'Selected Batch'}
-                </h2>
-                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-500 font-bold">
-                  <span>Code: <span className="text-slate-700">{batches.find(b => b.id === filters.batch)?.batchCode || '—'}</span></span>
-                  <span>•</span>
-                  <span>Program: <span className="text-slate-700">{programs.find(p => p.id === batches.find(b => b.id === filters.batch)?.programId)?.programName || '—'}</span></span>
-                  <span>•</span>
-                  <span>Center: <span className="text-slate-700">{centers.find(c => c.id === batches.find(b => b.id === filters.batch)?.centerId)?.centerName || '—'}</span></span>
-                </div>
-              </div>
-            </div>
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={() => {
-                setFilters({ ...filters, batch: '' });
-                setSearch('');
-              }} 
-              className="bg-white border-slate-200 hover:bg-slate-50 font-black text-slate-700 rounded-xl px-5"
-            >
-              ← Back to All Batches
-            </Button>
-          </div>
+      {/* Modern Search and Filter Row */}
+      <div className="flex flex-col sm:flex-row gap-4 items-center">
+        <div className="flex-1 relative w-full">
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <Input 
+            placeholder="Search by name, registration number or email..." 
+            value={search} 
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-14 py-7 rounded-2xl text-xs font-bold border-slate-100 focus:border-blue-400 focus:ring-0 transition-all bg-white shadow-sm shadow-slate-100/50 h-14 text-slate-700"
+          />
+        </div>
+        <Button 
+          variant="secondary" 
+          size="md" 
+          onClick={() => setIsFilterOpen(true)} 
+          className="bg-white border border-slate-100 text-slate-800 rounded-3xl h-14 px-8 whitespace-nowrap shadow-sm shadow-slate-100/30 font-black text-xs uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2.5 w-full sm:w-auto justify-center transition-all"
+        >
+          <Filter size={15} className="text-slate-400" />
+          Advanced Filters
+        </Button>
+      </div>
 
-          <div className="flex flex-col md:flex-row gap-6">
-            <div className="flex-1 relative">
-              <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-              <Input 
-                placeholder="Search students in this batch by name or registration number..." 
-                value={search} 
-                onChange={e => setSearch(e.target.value)}
-                className="pl-14 py-8 rounded-2xl text-lg font-bold border-slate-100 focus:border-blue-400 transition-all bg-white shadow-sm"
-              />
-            </div>
-            <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl h-auto px-6 whitespace-nowrap">
-              <Filter size={18} className="mr-2" />
-              Advanced Filters
-            </Button>
-          </div>
-
-          <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-slate-50/50 border-b border-slate-100">
-                    <th className="px-8 py-5 text-left w-10">
-                      <input 
-                        type="checkbox" 
-                        className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        checked={filteredStudents.length > 0 && selectedIds.length === filteredStudents.length}
-                        onChange={toggleSelectAll}
-                      />
-                    </th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] whitespace-nowrap">Details</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Reg No.</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Student Name</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Gender</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Batch Code</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Center</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Program</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Type</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Rank Target</th>
-                    <th className="px-4 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Target Year</th>
-                    <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{isAdmin ? 'Action' : 'View'}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {loading ? (
-                    Array(6).fill(0).map((_, i) => (
-                      <tr key={i} className="animate-pulse">
-                        <td colSpan={11} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
-                      </tr>
-                    ))
-                  ) : filteredStudents.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} className="py-20 text-center space-y-4">
-                        <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">
-                           <User size={40} />
-                        </div>
-                        <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px]">No students found in this batch</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredStudents.map(student => (
-                        <StudentRow 
-                          key={student.id} 
-                          student={student} 
-                          isAdmin={isAdmin}
-                          selected={selectedIds.includes(student.id)}
-                          onSelect={(e: React.MouseEvent) => toggleSelect(student.id, e)}
-                          onClick={setSelectedStudent}
-                          onEditClick={(s: any) => {
-                            setSelectedStudent(s);
-                            setIsEditMode(true);
-                          }}
-                          onDeleteClick={async (s: any) => {
-                            const isInactive = s.status === 'inactive';
-                            const action = isInactive ? 'permanently delete' : 'archive';
-                            const message = isInactive 
-                              ? `Are you sure you want to PERMANENTLY delete ${s.name} from Firebase? This cannot be undone.`
-                              : `Are you sure you want to archive ${s.name}? The record will remain in Firebase but will be hidden from the active list.`;
-
-                            if (confirm(message)) {
-                              setLoading(true);
-                              try {
-                                if (isInactive) {
-                                  await deleteDoc(doc(db, 'students', s.id));
-                                  toast.success('Student permanently deleted');
-                                } else {
-                                  await updateDoc(doc(db, 'students', s.id), { status: 'inactive' });
-                                  toast.success('Student archived successfully');
-                                }
-                                fetchStudents(true);
-                              } catch (err) {
-                                handleFirestoreError(err, OperationType.WRITE, 'students_row_delete');
-                              } finally {
-                                setLoading(false);
-                              }
-                            }
-                          }}
-                          programName={programs.find(p => p.id === student.programId)?.programName || student.programId}
-                          centerName={centers.find(c => c.id === student.centerId)?.centerName || student.centerId}
-                          batchName={batches.find(b => b.id === student.batchId)?.batchName || student.batchId}
-                        />
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </>
-      ) : (
-        /* Batch Browser Mode (Dynamic Firestore Fetch Minimizer!) */
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center bg-slate-50/50 p-4 rounded-3xl border border-slate-100">
-            <div className="flex items-center gap-2 px-2">
-              <Filter size={16} className="text-slate-400" />
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Browse by</span>
-            </div>
-            
-            <div className="flex flex-wrap gap-4 items-center flex-1">
-              <Select 
-                value={filters.program} 
-                onChange={e => setFilters({ ...filters, program: e.target.value })}
-                className="w-full sm:w-auto h-11 py-1 px-4 text-xs font-bold rounded-xl border border-slate-100 bg-white"
-              >
-                <option value="">All Programs</option>
-                {programs.filter(p => p.isActive).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
-              </Select>
-
-              <Select 
-                value={filters.center} 
-                onChange={e => setFilters({ ...filters, center: e.target.value })}
-                className="w-full sm:w-auto h-11 py-1 px-4 text-xs font-bold rounded-xl border border-slate-100 bg-white"
-              >
-                <option value="">All Centers</option>
-                {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
-              </Select>
-
-              <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                <input 
-                  type="text"
-                  placeholder="Type to find batch..."
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  className="w-full h-11 pl-9 pr-4 py-2 text-xs font-bold rounded-xl border border-slate-100 bg-white focus:outline-none focus:border-blue-400"
-                />
-              </div>
-
-              {(filters.program || filters.center || search) && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => {
-                    setFilters({ ...filters, program: '', center: '' });
-                    setSearch('');
-                  }}
-                  className="text-rose-500 font-bold hover:bg-rose-50 rounded-xl"
-                >
-                  Clear Filters
-                </Button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between pl-1">
-            <h2 className="text-xs font-black text-slate-400 uppercase tracking-widest">Select Batch to View Student Details</h2>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-              {batches.filter(b => b.isActive).length} Available Batches
+      {/* Active Filter Pills Row */}
+      {(filters.batch || filters.center || filters.program || filters.gender || filters.type || filters.status || filters.targetYear || filters.rankTarget) && (
+        <div className="flex flex-wrap gap-2 items-center pl-1 py-1">
+          <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mr-1">Active Filters:</span>
+          {filters.program && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-[10px] font-extrabold border border-blue-100/50">
+              Prog: {programs.find(p => p.id === filters.program)?.programName || filters.program}
+              <button onClick={() => setFilters({ ...filters, program: '' })} className="hover:text-blue-900 font-bold text-xs">×</button>
             </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {batches
-              .filter(b => {
-                const matchesProgram = !filters.program || b.programId === filters.program;
-                const matchesCenter = !filters.center || b.centerId === filters.center;
-                const matchesSearch = !search || 
-                  (b.batchName || '').toLowerCase().includes(search.toLowerCase()) || 
-                  (b.batchCode || '').toLowerCase().includes(search.toLowerCase());
-                return b.isActive && matchesProgram && matchesCenter && matchesSearch;
-              })
-              .map(batch => {
-                const programName = programs.find(p => p.id === batch.programId)?.programName || '—';
-                const centerName = centers.find(c => c.id === batch.centerId)?.centerName || '—';
-                return (
-                  <div 
-                    key={batch.id} 
-                    onClick={() => {
-                      setSearch('');
-                      setFilters({ ...filters, batch: batch.id });
-                    }}
-                    className="bg-white p-6 rounded-[2rem] border border-slate-100 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-50/10 cursor-pointer transition-all duration-300 flex flex-col justify-between group h-44 relative overflow-hidden"
-                  >
-                    <div className="absolute right-0 top-0 w-24 h-24 bg-blue-50/30 rounded-bl-full group-hover:bg-blue-50/50 transition-colors -z-0 pointer-events-none" />
-                    <div className="space-y-2 z-10">
-                      <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md uppercase tracking-wider">{batch.batchCode || 'No Code'}</span>
-                      <h3 className="text-xl font-black text-slate-900 line-clamp-1 group-hover:text-blue-600 transition-colors pt-1">{batch.batchName}</h3>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between text-xs text-slate-500 z-10">
-                      <div className="space-y-0.5">
-                        <p className="font-bold text-slate-400">Prog: <span className="text-slate-600">{programName}</span></p>
-                        <p className="font-bold text-slate-400">Center: <span className="text-slate-600">{centerName}</span></p>
-                      </div>
-                      <div className="w-9 h-9 rounded-xl bg-slate-50 group-hover:bg-blue-600 group-hover:text-white transition-all flex items-center justify-center">
-                        <ChevronRight size={18} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-
-            {batches.filter(b => {
-              const matchesProgram = !filters.program || b.programId === filters.program;
-              const matchesCenter = !filters.center || b.centerId === filters.center;
-              const matchesSearch = !search || 
-                (b.batchName || '').toLowerCase().includes(search.toLowerCase()) || 
-                (b.batchCode || '').toLowerCase().includes(search.toLowerCase());
-              return b.isActive && matchesProgram && matchesCenter && matchesSearch;
-            }).length === 0 && (
-              <div className="col-span-full bg-white rounded-[2rem] border border-slate-100 py-16 text-center space-y-3">
-                <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">No matching batches found</p>
-                <p className="text-slate-500 text-sm font-medium">Try adjusting your Quick Browse filters or search term.</p>
-              </div>
-            )}
-          </div>
+          )}
+          {filters.center && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-50 text-green-700 rounded-full text-[10px] font-extrabold border border-green-100/50">
+              Center: {centers.find(c => c.id === filters.center)?.centerName || filters.center}
+              <button onClick={() => setFilters({ ...filters, center: '' })} className="hover:text-green-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.batch && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full text-[10px] font-extrabold border border-indigo-100/50">
+              Batch: {batches.find(b => b.id === filters.batch)?.batchName || filters.batch}
+              <button onClick={() => setFilters({ ...filters, batch: '' })} className="hover:text-indigo-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.gender && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 rounded-full text-[10px] font-extrabold border border-amber-100/50">
+              Gender: {filters.gender}
+              <button onClick={() => setFilters({ ...filters, gender: '' })} className="hover:text-amber-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.type && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-[10px] font-extrabold border border-purple-100/50">
+              Type: {filters.type}
+              <button onClick={() => setFilters({ ...filters, type: '' })} className="hover:text-purple-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.status && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-teal-50 text-teal-700 rounded-full text-[10px] font-extrabold border border-teal-100/50">
+              Status: {filters.status}
+              <button onClick={() => setFilters({ ...filters, status: '' })} className="hover:text-teal-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.targetYear && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-pink-50 text-pink-700 rounded-full text-[10px] font-extrabold border border-pink-100/50">
+              Year: {filters.targetYear}
+              <button onClick={() => setFilters({ ...filters, targetYear: '' })} className="hover:text-pink-900 font-bold text-xs">×</button>
+            </span>
+          )}
+          {filters.rankTarget && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-50 text-orange-700 rounded-full text-[10px] font-extrabold border border-orange-100/50">
+              Rank: {filters.rankTarget}
+              <button onClick={() => setFilters({ ...filters, rankTarget: '' })} className="hover:text-orange-950 font-bold text-xs">×</button>
+            </span>
+          )}
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setFilters({
+              program: '', center: '', batch: '', gender: '', type: '', 
+              status: '', targetYear: '', rankTarget: '', showInactive: false
+            })}
+            className="text-rose-500 hover:bg-rose-50 font-extrabold text-[9px] uppercase tracking-wider rounded-lg py-1 px-2.5 h-auto transition-colors"
+          >
+            Clear All
+          </Button>
         </div>
       )}
+
+      {/* Primary Unified Flat Table */}
+      <div className="bg-white rounded-[2.2rem] shadow-sm border border-slate-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-slate-50/10 border-b border-slate-100">
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap pl-9">Student Name</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Gender</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Batch Code</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Center</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Program</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Type</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Rank Target</th>
+                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Target Year</th>
+                <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">{isAdmin ? 'Action' : 'View'}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {loading ? (
+                Array(6).fill(0).map((_, i) => (
+                  <tr key={i} className="animate-pulse">
+                    <td colSpan={9} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
+                  </tr>
+                ))
+              ) : filteredStudents.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-20 text-center space-y-4">
+                    <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300 shadow-inner">
+                       <User size={30} />
+                    </div>
+                    <p className="text-slate-400 font-black uppercase tracking-widest text-[9px]">No students found matching current view</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredStudents.map(student => (
+                  <StudentRow 
+                    key={student.id} 
+                    student={student} 
+                    isAdmin={isAdmin}
+                    selected={selectedIds.includes(student.id)}
+                    onSelect={(e: React.MouseEvent) => toggleSelect(student.id, e)}
+                    onClick={setSelectedStudent}
+                    onEditClick={(s: any) => {
+                      setSelectedStudent(s);
+                      setIsEditMode(true);
+                    }}
+                    onDeleteClick={async (s: any) => {
+                      const isInactive = s.status === 'inactive';
+                      const message = isInactive 
+                        ? `Are you sure you want to PERMANENTLY delete ${s.name} from Firebase? This cannot be undone.`
+                        : `Are you sure you want to archive ${s.name}? The record will remain in Firebase but will be hidden from the active list.`;
+
+                      if (confirm(message)) {
+                        setLoading(true);
+                        try {
+                          if (isInactive) {
+                            await deleteDoc(doc(db, 'students', s.id));
+                            toast.success('Student permanently deleted');
+                          } else {
+                            await updateDoc(doc(db, 'students', s.id), { status: 'inactive' });
+                            toast.success('Student archived successfully');
+                          }
+                          fetchStudents(true);
+                        } catch (err) {
+                          handleFirestoreError(err, OperationType.WRITE, 'students_row_delete');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                    programName={programs.find(p => p.id === student.programId)?.programName || student.programId}
+                    centerName={centers.find(c => c.id === student.centerId)?.centerName || student.centerId}
+                    batchName={batches.find(b => b.id === student.batchId)?.batchName || student.batchId}
+                    batchCode={batches.find(b => b.id === student.batchId)?.batchCode || student.batchCode || '—'}
+                  />
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <AnimatePresence>
         {selectedIds.length > 0 && (
@@ -1174,82 +1104,76 @@ export default function Students() {
   );
 }
 
-function StudentRow({ student, selected, onSelect, onClick, onEditClick, onDeleteClick, programName, centerName, batchName, isAdmin }: any) {
+function StudentRow({ student, selected, onSelect, onClick, onEditClick, onDeleteClick, programName, centerName, batchName, batchCode, isAdmin }: any) {
   return (
     <tr 
       className={cn(
-        "group transition-colors cursor-pointer text-[12px]",
-        selected ? "bg-blue-50/50" : "hover:bg-slate-50/50"
+        "group transition-all cursor-pointer text-xs border-b border-slate-100 hover:bg-slate-50/40 relative"
       )}
       onClick={() => onClick(student)}
     >
-      <td className="px-8 py-4 w-10 text-center" onClick={e => e.stopPropagation()}>
-        <input 
-          type="checkbox" 
-          checked={selected}
-          onChange={onSelect as any}
-          className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer transition-transform active:scale-95"
-        />
+      <td className="px-6 py-5 whitespace-nowrap relative pl-9">
+        {/* Subtle status left pill decoration */}
+        <div className={cn(
+          "absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-8 rounded-r-md transition-colors",
+          student.status === 'active' ? "bg-blue-500/80" : "bg-slate-300"
+        )} />
+        <span className="font-extrabold text-slate-800 text-sm tracking-tight block group-hover:text-blue-600 transition-colors">
+          {student.name}
+        </span>
       </td>
-      <td className="px-4 py-4 whitespace-nowrap">
-        <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform flex-shrink-0">
-             <User size={14} />
-          </div>
-          <Badge variant={student.status === 'active' ? "green" : "slate"} className="px-2 py-0.5 text-[9px] uppercase">
-            {student.status || 'Active'}
-          </Badge>
-        </div>
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.gender || '—'}</td>
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{batchCode || '—'}</td>
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{centerName || '—'}</td>
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{programName || '—'}</td>
+      <td className="px-6 py-5 text-slate-400 font-extrabold whitespace-nowrap text-[11px] uppercase tracking-wider">
+        <span className={cn(
+          "px-2.5 py-1 rounded-full text-[10px] font-black",
+          String(student.type).toLowerCase() === 'e-gurukul' ? "bg-indigo-50 text-indigo-600" : "bg-teal-50 text-teal-600"
+        )}>
+          {student.type || '—'}
+        </span>
       </td>
-      <td className="px-4 py-4">
-        <Badge variant="blue" className="text-[10px] px-2 py-0.5 font-bold">{student.regNo}</Badge>
-      </td>
-      <td className="px-4 py-4 font-black text-slate-800">{student.name}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{student.gender || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{student.batchCode || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{centerName || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{programName || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{student.type || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{student.rankTarget || '—'}</td>
-      <td className="px-4 py-4 text-slate-500 font-bold">{student.targetYear || '—'}</td>
-      <td className="px-8 py-4 text-right">
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.rankTarget || '—'}</td>
+      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.targetYear || '—'}</td>
+      <td className="px-8 py-5 text-right whitespace-nowrap">
         <div className="flex items-center justify-end space-x-2">
           {isAdmin && (
             <>
               <Button 
                 variant="secondary" 
                 size="sm" 
-                className="w-10 h-10 p-0 bg-red-50 border border-red-100 rounded-2xl hover:bg-white hover:shadow-lg transition-all"
+                className="w-10 h-10 p-0 bg-red-50 border border-transparent rounded-full hover:bg-red-100 text-red-500 transition-all flex items-center justify-center active:scale-90"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onDeleteClick(student);
                 }}
               >
-                 <Trash2 size={16} className="text-red-600" />
+                 <Trash2 size={16} />
               </Button>
               <Button 
                 variant="secondary" 
                 size="sm" 
-                className="w-10 h-10 p-0 bg-blue-50 border border-blue-100 rounded-2xl hover:bg-white hover:shadow-lg transition-all"
+                className="w-10 h-10 p-0 bg-blue-50 border border-transparent rounded-full hover:bg-blue-100 text-blue-600 transition-all flex items-center justify-center active:scale-90"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onEditClick(student);
                 }}
               >
-                 <Edit2 size={16} className="text-blue-600" />
+                 <Edit2 size={16} />
               </Button>
             </>
           )}
           <Button 
             variant="secondary" 
             size="sm" 
-            className="w-10 h-10 p-0 bg-white border border-slate-100 rounded-2xl hover:shadow-lg transition-all"
+            className="w-10 h-10 p-0 bg-white border border-slate-100/60 rounded-full hover:bg-slate-50 hover:border-slate-200 text-slate-400 hover:text-slate-600 transition-all flex items-center justify-center active:scale-90 shadow-sm"
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
               onClick(student);
             }}
           >
-             <ChevronRight size={18} strokeWidth={3} className="text-slate-400 group-hover:text-blue-600" />
+             <ChevronRight size={18} strokeWidth={3} />
           </Button>
         </div>
       </td>
