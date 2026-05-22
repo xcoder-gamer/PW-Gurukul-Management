@@ -20,7 +20,8 @@ import {
   Mail,
   Smartphone,
   FileText,
-  Edit2
+  Edit2,
+  ArrowUpDown
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, addDoc, getDocs, query, where, Timestamp, serverTimestamp, orderBy, limit, updateDoc, doc, deleteDoc, writeBatch, setDoc } from 'firebase/firestore';
@@ -58,6 +59,22 @@ export default function Students() {
   const [isEditMode, setIsEditMode] = useState(false);
   
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  
+  const [sortField, setSortField] = useState<string>('name');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkEditData, setBulkEditData] = useState({
+    programId: '',
+    centerId: '',
+    batchId: '',
+    batchCode: '',
+    gender: '',
+    type: '',
+    targetYear: '',
+    rankTarget: '',
+    status: ''
+  });
   
   useEffect(() => {
     console.log('Current selected IDs:', selectedIds);
@@ -349,6 +366,133 @@ export default function Students() {
     });
   }, [students, search, filters]);
 
+  // Memoize sorted students
+  const sortedStudents = React.useMemo(() => {
+    const list = [...filteredStudents];
+    if (!sortField) return list;
+
+    return list.sort((a, b) => {
+      let valA: any = '';
+      let valB: any = '';
+
+      if (sortField === 'name') {
+        valA = a.name || '';
+        valB = b.name || '';
+      } else if (sortField === 'gender') {
+        valA = a.gender || '';
+        valB = b.gender || '';
+      } else if (sortField === 'batchCode') {
+        const bA = batches.find(x => x.id === a.batchId);
+        const bB = batches.find(x => x.id === b.batchId);
+        valA = bA?.batchCode || bA?.batchName || a.batchCode || a.batchId || '';
+        valB = bB?.batchCode || bB?.batchName || b.batchCode || b.batchId || '';
+      } else if (sortField === 'center') {
+        const cA = centers.find(x => x.id === a.centerId);
+        const cB = centers.find(x => x.id === b.centerId);
+        valA = cA?.centerName || a.centerId || '';
+        valB = cB?.centerName || b.centerId || '';
+      } else if (sortField === 'program') {
+        const pA = programs.find(x => x.id === a.programId);
+        const pB = programs.find(x => x.id === b.programId);
+        valA = pA?.programName || a.programId || '';
+        valB = pB?.programName || b.programId || '';
+      } else if (sortField === 'type') {
+        valA = a.type || '';
+        valB = b.type || '';
+      } else if (sortField === 'rankTarget') {
+        valA = a.rankTarget || '';
+        valB = b.rankTarget || '';
+      } else if (sortField === 'targetYear') {
+        valA = a.targetYear || '';
+        valB = b.targetYear || '';
+      }
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortDirection === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      } else {
+        if (valA === valB) return 0;
+        if (sortDirection === 'asc') {
+          return valA > valB ? 1 : -1;
+        } else {
+          return valA < valB ? 1 : -1;
+        }
+      }
+    });
+  }, [filteredStudents, sortField, sortDirection, batches, centers, programs]);
+
+  const toggleSort = (field: string) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const handleBulkUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const batchSize = 400;
+      const updates: any = {};
+      if (bulkEditData.programId) updates.programId = bulkEditData.programId;
+      if (bulkEditData.centerId) updates.centerId = bulkEditData.centerId;
+      if (bulkEditData.batchId) {
+        updates.batchId = bulkEditData.batchId;
+        const b = batches.find(x => x.id === bulkEditData.batchId);
+        if (b) {
+          updates.batchCode = b.batchCode || b.batchName || '';
+        }
+      }
+      if (bulkEditData.gender) updates.gender = bulkEditData.gender;
+      if (bulkEditData.type) updates.type = bulkEditData.type;
+      if (bulkEditData.targetYear) updates.targetYear = bulkEditData.targetYear;
+      if (bulkEditData.rankTarget) updates.rankTarget = bulkEditData.rankTarget;
+      if (bulkEditData.status) updates.status = bulkEditData.status;
+
+      if (Object.keys(updates).length === 0) {
+        toast.error('No parameters to update. Select at least one field code.');
+        setLoading(false);
+        return;
+      }
+
+      for (let i = 0; i < selectedIds.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = selectedIds.slice(i, i + batchSize);
+        chunk.forEach(id => {
+          batch.update(doc(db, 'students', id), {
+            ...updates,
+            updatedAt: Timestamp.now()
+          });
+        });
+        await batch.commit();
+      }
+
+      await addLog({
+        userId: user?.uid || 'system',
+        userEmail: user?.email || 'unknown',
+        action: LogAction.UPDATE,
+        category: LogCategory.STUDENT,
+        resourceId: 'bulk',
+        resourceName: 'Bulk Update',
+        details: `Bulk updated ${selectedIds.length} students params: ${Object.keys(updates).join(', ')}`,
+        newData: updates
+      });
+
+      toast.success(`Successfully updated ${selectedIds.length} students`);
+      setIsBulkEditOpen(false);
+      setSelectedIds([]);
+      fetchStudents(true);
+    } catch (err) {
+      console.error('Error during bulk edit update:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'students_bulk_edit');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredStudents.length) {
       setSelectedIds([]);
@@ -413,23 +557,23 @@ export default function Students() {
       </header>
 
       {/* Modern Search and Filter Row */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center">
+      <div className="flex flex-col sm:flex-row gap-3 items-center">
         <div className="flex-1 relative w-full">
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <Input 
             placeholder="Search by name, registration number or email..." 
             value={search} 
             onChange={e => setSearch(e.target.value)}
-            className="w-full pl-14 py-7 rounded-2xl text-xs font-bold border-slate-100 focus:border-blue-400 focus:ring-0 transition-all bg-white shadow-sm shadow-slate-100/50 h-14 text-slate-700"
+            className="w-full pl-11 py-2.5 rounded-xl text-xs font-semibold border-slate-100 focus:border-blue-400 focus:ring-0 transition-all bg-white shadow-sm shadow-slate-100/20 h-11 text-slate-700"
           />
         </div>
         <Button 
           variant="secondary" 
           size="md" 
           onClick={() => setIsFilterOpen(true)} 
-          className="bg-white border border-slate-100 text-slate-800 rounded-3xl h-14 px-8 whitespace-nowrap shadow-sm shadow-slate-100/30 font-black text-xs uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2.5 w-full sm:w-auto justify-center transition-all"
+          className="bg-white border border-slate-200 text-slate-800 rounded-xl h-11 px-6 whitespace-nowrap shadow-sm font-bold text-xs uppercase tracking-wider hover:bg-slate-50 flex items-center gap-2 w-full sm:w-auto justify-center transition-all"
         >
-          <Filter size={15} className="text-slate-400" />
+          <Filter size={14} className="text-slate-400" />
           Advanced Filters
         </Button>
       </div>
@@ -501,32 +645,248 @@ export default function Students() {
       )}
 
       {/* Primary Unified Flat Table */}
-      <div className="bg-white rounded-[2.2rem] shadow-sm border border-slate-100 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100/80 overflow-hidden">
+        {selectedIds.length > 0 && (
+          <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between gap-4 border-b border-slate-800 animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <span className="bg-blue-600 text-white font-extrabold px-2 py-0.5 rounded-full text-xs animate-pulse">
+                {selectedIds.length}
+              </span>
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Selected</span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="bg-white/10 hover:bg-white/20 text-white border-transparent text-xs font-bold py-1 h-8"
+                onClick={() => {
+                  const dataToExport = students.filter(s => selectedIds.includes(s.id));
+                  const ws = XLSX.utils.json_to_sheet(dataToExport);
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, "Selected Students");
+                  XLSX.writeFile(wb, "Selected_Students.xlsx");
+                }}
+              >
+                <Download size={13} className="mr-1" /> Export
+              </Button>
+              {isAdmin && (
+                <>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-transparent text-xs font-bold py-1 h-8"
+                    onClick={async () => {
+                      if (confirm(`Archive ${selectedIds.length} students? They will be hidden from findings.`)) {
+                        setLoading(true);
+                        try {
+                          const batchSize = 400;
+                          for (let i = 0; i < selectedIds.length; i += batchSize) {
+                            const batch = writeBatch(db);
+                            const chunk = selectedIds.slice(i, i + batchSize);
+                            chunk.forEach(id => {
+                              batch.update(doc(db, 'students', id), { status: 'inactive' });
+                            });
+                            await batch.commit();
+                          }
+                          
+                          await addLog({
+                            userId: user?.uid || 'system',
+                            userEmail: user?.email || 'unknown',
+                            action: LogAction.UPDATE,
+                            category: LogCategory.STUDENT,
+                            resourceId: 'bulk',
+                            resourceName: 'Bulk Archive',
+                            details: `Archived ${selectedIds.length} students via bulk action`,
+                          });
+
+                          toast.success(`Archived ${selectedIds.length} students`);
+                          setSelectedIds([]);
+                          fetchStudents(true);
+                        } catch (err) {
+                          console.error('Bulk archive error:', err);
+                          handleFirestoreError(err, OperationType.WRITE, 'students_bulk_archive');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                  >
+                    <Archive size={13} className="mr-1" /> Archive
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="bg-red-500/20 hover:bg-red-500/30 text-rose-300 border-transparent text-xs font-bold py-1 h-8"
+                    onClick={async () => {
+                      if (confirm(`PERMANENTLY DELETE ${selectedIds.length} students from Firebase? This cannot be undone.`)) {
+                        setLoading(true);
+                        try {
+                          const batchSize = 400;
+                          for (let i = 0; i < selectedIds.length; i += batchSize) {
+                            const batch = writeBatch(db);
+                            const chunk = selectedIds.slice(i, i + batchSize);
+                            chunk.forEach(id => {
+                              batch.delete(doc(db, 'students', id));
+                            });
+                            await batch.commit();
+                          }
+                          
+                          await addLog({
+                            userId: user?.uid || 'system',
+                            userEmail: user?.email || 'unknown',
+                            action: LogAction.DELETE,
+                            category: LogCategory.STUDENT,
+                            resourceId: 'bulk',
+                            resourceName: 'Bulk Delete',
+                            details: `Permanently deleted ${selectedIds.length} students`,
+                          });
+
+                          toast.success(`Successfully deleted ${selectedIds.length} students`);
+                          setSelectedIds([]);
+                          await fetchStudents(true);
+                        } catch (err) {
+                          console.error('Bulk delete failed', err);
+                          handleFirestoreError(err, OperationType.WRITE, 'students_bulk_delete');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }
+                    }}
+                  >
+                    <Trash2 size={13} className="mr-1" /> Delete Bulk
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border-transparent text-xs font-bold py-1 h-8"
+                    onClick={() => {
+                      setBulkEditData({
+                        programId: '',
+                        centerId: '',
+                        batchId: '',
+                        batchCode: '',
+                        gender: '',
+                        type: '',
+                        targetYear: '',
+                        rankTarget: '',
+                        status: ''
+                      });
+                      setIsBulkEditOpen(true);
+                    }}
+                  >
+                    <Edit2 size={13} className="mr-1" /> Bulk Edit
+                  </Button>
+                </>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-slate-400 hover:text-white text-xs font-bold py-1 h-8"
+                onClick={() => setSelectedIds([])}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
-              <tr className="bg-slate-50/10 border-b border-slate-100">
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap pl-9">Student Name</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Gender</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Batch Code</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Center</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Program</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Type</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Rank Target</th>
-                <th className="px-6 py-5 text-left text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">Target Year</th>
-                <th className="px-8 py-5 text-right text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] whitespace-nowrap">{isAdmin ? 'Action' : 'View'}</th>
+              <tr className="bg-slate-50/40 border-b border-slate-100 select-none">
+                <th className="pl-4 pr-1 py-2.5 text-center w-10">
+                  <input 
+                    type="checkbox" 
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+                    checked={filteredStudents.length > 0 && selectedIds.length === filteredStudents.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
+                <th 
+                  onClick={() => toggleSort('name')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Student Name
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'name' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('gender')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Gender
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'gender' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('batchCode')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Batch Code
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'batchCode' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('center')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Center
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'center' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('program')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Program
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'program' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('type')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Type
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'type' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('rankTarget')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Rank Target
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'rankTarget' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th 
+                  onClick={() => toggleSort('targetYear')}
+                  className="px-2 py-2.5 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap cursor-pointer hover:bg-slate-50/50 group"
+                >
+                  <div className="flex items-center gap-1">
+                    Target Year
+                    <ArrowUpDown size={11} className={cn("transition-colors", sortField === 'targetYear' ? "text-blue-600" : "text-slate-300 group-hover:text-slate-400")} />
+                  </div>
+                </th>
+                <th className="pr-4 pl-1 py-2.5 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">{isAdmin ? 'Action' : 'View'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
               {loading ? (
                 Array(6).fill(0).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td colSpan={9} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
+                    <td colSpan={10} className="px-8 py-6"><div className="h-10 bg-slate-50 rounded-xl w-full" /></td>
                   </tr>
                 ))
-              ) : filteredStudents.length === 0 ? (
+              ) : sortedStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-20 text-center space-y-4">
+                  <td colSpan={10} className="py-20 text-center space-y-4">
                     <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300 shadow-inner">
                        <User size={30} />
                     </div>
@@ -534,7 +894,7 @@ export default function Students() {
                   </td>
                 </tr>
               ) : (
-                filteredStudents.map(student => (
+                sortedStudents.map(student => (
                   <StudentRow 
                     key={student.id} 
                     student={student} 
@@ -719,6 +1079,30 @@ export default function Students() {
                   >
                     <Trash2 size={14} />
                     Delete
+                  </button>
+
+                  <button 
+                    type="button"
+                    className="flex items-center gap-2 hover:text-blue-400 transition-all active:scale-95 font-black text-[10px] uppercase tracking-widest px-3 py-2 rounded-xl hover:bg-white/5"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setBulkEditData({
+                        programId: '',
+                        centerId: '',
+                        batchId: '',
+                        batchCode: '',
+                        gender: '',
+                        type: '',
+                        targetYear: '',
+                        rankTarget: '',
+                        status: ''
+                      });
+                      setIsBulkEditOpen(true);
+                    }}
+                  >
+                    <Edit2 size={14} />
+                    Bulk Edit
                   </button>
                 </>
               )}
@@ -1100,6 +1484,132 @@ export default function Students() {
           <Button variant="secondary" size="lg" className="w-full" onClick={() => setIsUploadModalOpen(false)}>Cancel</Button>
         </div>
       </BottomSheet>
+
+      <BottomSheet isOpen={isBulkEditOpen} onClose={() => setIsBulkEditOpen(false)}>
+        <form onSubmit={handleBulkUpdateSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto px-1 font-black">
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">Bulk Edit ({selectedIds.length} Students)</h2>
+          <p className="text-xs text-slate-400 font-bold mt-2 leading-relaxed">Select the fields you want to update for all selected students. Fields left blank or untouched will NOT be modified.</p>
+          
+          <div className="space-y-4 pb-4 font-black">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Program</label>
+                <Select value={bulkEditData.programId} onChange={e => setBulkEditData({...bulkEditData, programId: e.target.value, batchId: ''})}>
+                  <option value="">Keep Current Program</option>
+                  {programs.filter(p => p.isActive).map(p => <option key={p.id} value={p.id}>{p.programName}</option>)}
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Center</label>
+                <Select value={bulkEditData.centerId} onChange={e => setBulkEditData({...bulkEditData, centerId: e.target.value, batchId: ''})}>
+                  <option value="">Keep Current Center</option>
+                  {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Batch</label>
+                <Select value={bulkEditData.batchId} onChange={e => {
+                  const bId = e.target.value;
+                  const found = batches.find(b => b.id === bId);
+                  setBulkEditData({
+                    ...bulkEditData,
+                    batchId: bId,
+                    batchCode: found ? (found.batchCode || found.batchName) : ''
+                  });
+                }}>
+                  <option value="">Keep Current Batch</option>
+                  {batches.filter(b => b.isActive).map(b => (
+                    (!bulkEditData.programId || b.programId === bulkEditData.programId) && 
+                    (!bulkEditData.centerId || b.centerId === bulkEditData.centerId) &&
+                    <option key={b.id} value={b.id}>{b.batchName}</option>
+                  ))}
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Gender</label>
+                <Select value={bulkEditData.gender} onChange={e => setBulkEditData({...bulkEditData, gender: e.target.value})}>
+                  <option value="">Keep Current Gender</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                  <option value="Other">Other</option>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Type</label>
+                <Select value={bulkEditData.type} onChange={e => setBulkEditData({...bulkEditData, type: e.target.value})}>
+                  <option value="">Keep Current Type</option>
+                  <option value="Day Boarding">Day Boarding</option>
+                  <option value="e-Gurukul">e-Gurukul</option>
+                  <option value="Hosteller">Hosteller</option>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Target Year</label>
+                <Select value={bulkEditData.targetYear} onChange={e => setBulkEditData({...bulkEditData, targetYear: e.target.value})}>
+                  <option value="">Keep Current Year</option>
+                  <option value="2026">2026</option>
+                  <option value="2027">2027</option>
+                  <option value="2028">2028</option>
+                  <option value="2029">2029</option>
+                  <option value="2030">2030</option>
+                  <option value="2031">2031</option>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Rank Target</label>
+                <Select value={bulkEditData.rankTarget} onChange={e => setBulkEditData({...bulkEditData, rankTarget: e.target.value})}>
+                  <option value="">Keep Current Rank Target</option>
+                  <option value="Under 100">Under 100</option>
+                  <option value="Under 200">Under 200</option>
+                  <option value="Under 500">Under 500</option>
+                  <option value="Under 1000">Under 1000</option>
+                  <option value="Under 2000">Under 2000</option>
+                  <option value="Above 5000">Above 5000</option>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-extrabold px-1">Status</label>
+                <Select value={bulkEditData.status} onChange={e => setBulkEditData({...bulkEditData, status: e.target.value})}>
+                  <option value="">Keep Current Status</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex gap-4 pt-4 border-t border-slate-100 pb-10">
+            <Button 
+              type="button" 
+              variant="secondary" 
+              className="flex-1"
+              onClick={() => setIsBulkEditOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button 
+              type="submit" 
+              variant="primary" 
+              className="flex-1 shadow-xl shadow-blue-100"
+            >
+              Apply Changes
+            </Button>
+          </div>
+        </form>
+      </BottomSheet>
     </div>
   );
 }
@@ -1108,72 +1618,81 @@ function StudentRow({ student, selected, onSelect, onClick, onEditClick, onDelet
   return (
     <tr 
       className={cn(
-        "group transition-all cursor-pointer text-xs border-b border-slate-100 hover:bg-slate-50/40 relative"
+        "group transition-all cursor-pointer text-xs border-b border-slate-100 hover:bg-slate-50/40 relative",
+        selected ? "bg-blue-50/30" : ""
       )}
       onClick={() => onClick(student)}
     >
-      <td className="px-6 py-5 whitespace-nowrap relative pl-9">
+      <td className="pl-4 pr-1 py-1.5 w-10 text-center" onClick={e => e.stopPropagation()}>
+        <input 
+          type="checkbox" 
+          checked={selected}
+          onChange={onSelect as any}
+          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer accent-blue-600"
+        />
+      </td>
+      <td className="px-2 py-1.5 whitespace-nowrap relative">
         {/* Subtle status left pill decoration */}
         <div className={cn(
-          "absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-8 rounded-r-md transition-colors",
+          "absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 rounded-r transition-colors",
           student.status === 'active' ? "bg-blue-500/80" : "bg-slate-300"
         )} />
-        <span className="font-extrabold text-slate-800 text-sm tracking-tight block group-hover:text-blue-600 transition-colors">
+        <span className="font-bold text-slate-800 text-xs tracking-tight block group-hover:text-blue-600 transition-colors">
           {student.name}
         </span>
       </td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.gender || '—'}</td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{batchCode || '—'}</td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{centerName || '—'}</td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{programName || '—'}</td>
-      <td className="px-6 py-5 text-slate-400 font-extrabold whitespace-nowrap text-[11px] uppercase tracking-wider">
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{student.gender || '—'}</td>
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{batchCode || '—'}</td>
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{centerName || '—'}</td>
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{programName || '—'}</td>
+      <td className="px-2 py-1.5 text-slate-400 font-semibold whitespace-nowrap text-[10px] uppercase tracking-wider">
         <span className={cn(
-          "px-2.5 py-1 rounded-full text-[10px] font-black",
+          "px-2 py-0.5 rounded-full text-[9px] font-extrabold",
           String(student.type).toLowerCase() === 'e-gurukul' ? "bg-indigo-50 text-indigo-600" : "bg-teal-50 text-teal-600"
         )}>
           {student.type || '—'}
         </span>
       </td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.rankTarget || '—'}</td>
-      <td className="px-6 py-5 text-slate-500 font-bold whitespace-nowrap text-xs">{student.targetYear || '—'}</td>
-      <td className="px-8 py-5 text-right whitespace-nowrap">
-        <div className="flex items-center justify-end space-x-2">
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{student.rankTarget || '—'}</td>
+      <td className="px-2 py-1.5 text-slate-500 font-medium whitespace-nowrap text-xs">{student.targetYear || '—'}</td>
+      <td className="pr-4 pl-1 py-1.5 text-right whitespace-nowrap">
+        <div className="flex items-center justify-end space-x-1.5">
           {isAdmin && (
             <>
               <Button 
                 variant="secondary" 
                 size="sm" 
-                className="w-10 h-10 p-0 bg-red-50 border border-transparent rounded-full hover:bg-red-100 text-red-500 transition-all flex items-center justify-center active:scale-90"
+                className="w-7 h-7 p-0 bg-red-50 border border-transparent rounded-full hover:bg-red-100 text-red-500 transition-all flex items-center justify-center active:scale-90"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onDeleteClick(student);
                 }}
               >
-                 <Trash2 size={16} />
+                 <Trash2 size={13} />
               </Button>
               <Button 
                 variant="secondary" 
                 size="sm" 
-                className="w-10 h-10 p-0 bg-blue-50 border border-transparent rounded-full hover:bg-blue-100 text-blue-600 transition-all flex items-center justify-center active:scale-90"
+                className="w-7 h-7 p-0 bg-blue-50 border border-transparent rounded-full hover:bg-blue-100 text-blue-600 transition-all flex items-center justify-center active:scale-90"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onEditClick(student);
                 }}
               >
-                 <Edit2 size={16} />
+                 <Edit2 size={13} />
               </Button>
             </>
           )}
           <Button 
             variant="secondary" 
             size="sm" 
-            className="w-10 h-10 p-0 bg-white border border-slate-100/60 rounded-full hover:bg-slate-50 hover:border-slate-200 text-slate-400 hover:text-slate-600 transition-all flex items-center justify-center active:scale-90 shadow-sm"
+            className="w-7 h-7 p-0 bg-white border border-slate-100/60 rounded-full hover:bg-slate-50 hover:border-slate-200 text-slate-400 hover:text-slate-600 transition-all flex items-center justify-center active:scale-90 shadow-sm"
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
               onClick(student);
             }}
           >
-             <ChevronRight size={18} strokeWidth={3} />
+             <ChevronRight size={14} strokeWidth={3} />
           </Button>
         </div>
       </td>
