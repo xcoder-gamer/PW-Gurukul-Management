@@ -230,9 +230,36 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
       qScore = unattemptPoints;
       blankCount++;
       status = 'blank';
-    } else if (qData.type === 'Numerical' || qData.Type === 'Numerical' || (!isNaN(parseFloat(String(studentAns))) && !isNaN(parseFloat(String(correctAns)))) || correctAns.includes('OR') || correctAns.includes('/') || correctAns.includes('|')) {
-      // Numerical or Multi-option single choice
-      if (isMatched(studentAns, correctAns, true)) {
+    } else if (qData.isRange || correctAns.toLowerCase().includes('to') || (correctAns.includes('-') && !correctAns.startsWith('-') && !isNaN(parseFloat(correctAns.split('-')[0])) && !isNaN(parseFloat(correctAns.split('-')[1])))) {
+      // Dynamic range resolution for robust evaluation fallback
+      let rMin = parseFloat(String(qData.rangeMin ?? 0));
+      let rMax = parseFloat(String(qData.rangeMax ?? 0));
+      let isRangeValid = !!qData.isRange;
+
+      if (!isRangeValid) {
+        if (correctAns.toLowerCase().includes('to')) {
+          const parts = correctAns.toLowerCase().split('to').map(p => parseFloat(p.trim()));
+          if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            isRangeValid = true;
+            rMin = Math.min(parts[0], parts[1]);
+            rMax = Math.max(parts[0], parts[1]);
+          }
+        } else {
+          const parts = correctAns.split('-');
+          if (parts.length === 2) {
+            const p0 = parseFloat(parts[0].trim());
+            const p1 = parseFloat(parts[1].trim());
+            if (!isNaN(p0) && !isNaN(p1)) {
+              isRangeValid = true;
+              rMin = Math.min(p0, p1);
+              rMax = Math.max(p0, p1);
+            }
+          }
+        }
+      }
+
+      const val = parseFloat(studentAns);
+      if (isRangeValid && !isNaN(val) && val >= rMin && val <= rMax) {
         correctCount++;
         qScore = correctPoints;
         status = 'correct';
@@ -241,9 +268,9 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
         qScore = wrongPoints;
         status = 'wrong';
       }
-    } else if (qData.isRange) {
-      const val = parseFloat(studentAns);
-      if (!isNaN(val) && val >= qData.rangeMin && val <= qData.rangeMax) {
+    } else if (qData.type === 'Numerical' || qData.Type === 'Numerical' || (!isNaN(parseFloat(String(studentAns))) && !isNaN(parseFloat(String(correctAns)))) || correctAns.includes('OR') || correctAns.includes('/') || correctAns.includes('|')) {
+      // Numerical or Multi-option single choice
+      if (isMatched(studentAns, correctAns, true)) {
         correctCount++;
         qScore = correctPoints;
         status = 'correct';

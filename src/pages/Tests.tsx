@@ -212,8 +212,19 @@ export default function Tests() {
                 const parts = ans.toLowerCase().split('to').map(p => parseFloat(p.trim()));
                 if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
                   isRange = true;
-                  rangeMin = parts[0];
-                  rangeMax = parts[1];
+                  rangeMin = Math.min(parts[0], parts[1]);
+                  rangeMax = Math.max(parts[0], parts[1]);
+                }
+              } else if (ans.includes('-') && !ans.startsWith('-')) {
+                const parts = ans.split('-');
+                if (parts.length === 2) {
+                  const p0 = parseFloat(parts[0].trim());
+                  const p1 = parseFloat(parts[1].trim());
+                  if (!isNaN(p0) && !isNaN(p1)) {
+                    isRange = true;
+                    rangeMin = Math.min(p0, p1);
+                    rangeMax = Math.max(p0, p1);
+                  }
                 }
               }
 
