@@ -1148,6 +1148,10 @@ export default function Results() {
           setSelectedTestIds(allIds);
           fetchResults(allIds);
         }}
+        onSelectResult={(res) => {
+          setSelectedResult(res);
+          setView('detail');
+        }}
       />
     );
   }
@@ -2403,14 +2407,15 @@ export default function Results() {
   );
 }
 
-function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests }: { 
+function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult }: { 
   results: any[], 
   tests: any[], 
   onBack: () => void,
   selectedTestIds: string[],
   initialSearch?: string,
   onTestToggle?: (id: string) => void,
-  onSelectAllTests?: (ids: string[]) => void
+  onSelectAllTests?: (ids: string[]) => void,
+  onSelectResult?: (res: any) => void
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
@@ -2731,26 +2736,53 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       if (activeAnalysisView !== 'comparison') return;
       setIsLoadingAllComp(true);
       try {
-        let q;
-        if (selectedProgramId) {
-          q = query(
-            collection(db, 'result_updated'),
-            where('programId', '==', selectedProgramId)
-          );
-        } else {
-          q = query(collection(db, 'result_updated'));
-        }
-        const snap = await getDocs(q);
-        const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        const [resultsSnap, studentsSnap] = await Promise.all([
+          getDocs(collection(db, 'result_updated')),
+          getDocs(collection(db, 'students'))
+        ]);
+
+        const studentsList = studentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        const studentMap = studentsList.reduce((acc: any, s) => {
+          if (s.regNo) {
+            acc[String(s.regNo).trim().toUpperCase()] = s;
+          }
+          return acc;
+        }, {});
+
+        const docs = resultsSnap.docs.map(doc => {
+          const res = { id: doc.id, ...doc.data() } as any;
+          const regKey = String(res.regNo || '').trim().toUpperCase();
+          const studentInfo = studentMap[regKey];
+          
+          if (studentInfo) {
+            return {
+              ...res,
+              studentName: studentInfo.name || res.studentName,
+              centerId: studentInfo.centerId || res.centerId,
+              centerName: studentInfo.centerName || res.centerName,
+              batchId: studentInfo.batchId || res.batchId,
+              batchName: studentInfo.batchName || res.batchName,
+              programId: studentInfo.programId || res.programId,
+              programName: studentInfo.programName || res.programName,
+              regNo: studentInfo.regNo || res.regNo,
+              type: studentInfo.type || '',
+              rankTarget: studentInfo.rankTarget || '',
+              targetYear: studentInfo.targetYear || '',
+            };
+          } else {
+            return res;
+          }
+        });
+
         setAllCompResults(docs);
       } catch (err) {
-        console.error("Failed to load all comparison results for grid:", err);
+        console.error("Failed to load all comparison results for grid with student resolution:", err);
       } finally {
         setIsLoadingAllComp(false);
       }
     };
     fetchAllCompResults();
-  }, [selectedProgramId, activeAnalysisView]);
+  }, [activeAnalysisView]);
 
   const isMedicalProgram = useMemo(() => {
     if (!selectedProgramId) return false;
@@ -2764,57 +2796,66 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const getSubjectScore = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): string | number => {
     if (!res || !res.subjectStats || res.isAbsent) return '—';
     const stats = res.subjectStats;
+
+    // Normalize keys of stats to lowercase for complete case-insensitivity
+    const normalizedStats: Record<string, any> = {};
+    Object.entries(stats).forEach(([k, v]) => {
+      normalizedStats[k.toLowerCase().trim()] = v;
+    });
+
+    let val: any = null;
     if (subType === 'Physics') {
-      const val = stats.Physics || stats.PHYSICS || stats.PH || stats.ph || stats.physics;
-      return val ? (val.score ?? '—') : '—';
+      val = normalizedStats.physics;
+      if (val === undefined || val === null) val = normalizedStats.ph;
+    } else if (subType === 'Chemistry') {
+      val = normalizedStats.chemistry;
+      if (val === undefined || val === null) val = normalizedStats.ch;
+    } else if (subType === 'Math') {
+      val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
+    } else if (subType === 'Botany') {
+      val = normalizedStats.botany ?? normalizedStats.bot;
+    } else if (subType === 'Zoology') {
+      val = normalizedStats.zoology ?? normalizedStats.zoo;
+    } else if (subType === 'Biology') {
+      val = normalizedStats.biology ?? normalizedStats.bio;
     }
-    if (subType === 'Chemistry') {
-      const val = stats.Chemistry || stats.CHEMISTRY || stats.CH || stats.ch || stats.chemistry;
-      return val ? (val.score ?? '—') : '—';
+
+    if (val === null || val === undefined) return '—';
+    if (typeof val === 'object') {
+      const score = val.score !== undefined ? val.score : val.Score;
+      return score !== undefined ? score : '—';
     }
-    if (subType === 'Math') {
-      const val = stats.Math || stats.Maths || stats.Mathematics || stats.MATH || stats.mathematics || stats.MATHS;
-      return val ? (val.score ?? '—') : '—';
-    }
-    if (subType === 'Botany') {
-      const val = stats.Botany || stats.BOTANY || stats.botany || stats.BOT;
-      return val ? (val.score ?? '—') : '—';
-    }
-    if (subType === 'Zoology') {
-      const val = stats.Zoology || stats.ZOOLOGY || stats.zoology || stats.ZOO;
-      return val ? (val.score ?? '—') : '—';
-    }
-    if (subType === 'Biology') {
-      const val = stats.Biology || stats.BIOLOGY || stats.biology || stats.BIO || stats.bio;
-      return val ? (val.score ?? '—') : '—';
-    }
-    return '—';
+    return val;
   };
 
   const comparisonGridData = useMemo(() => {
-    let filtered = allCompResults.map(res => ({
-      ...res,
-      subjectStats: Array.isArray(res.subjectStats) 
-        ? res.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
-        : res.subjectStats || {},
-    }));
+    // Standardize allCompResults. If subjectStats is empty or missing, evaluate it dynamically.
+    const resolvedResults = allCompResults.map(res => {
+      let subjStats = res.subjectStats;
+      if (!subjStats || Object.keys(subjStats).length === 0) {
+        const test = tests.find(t => t.id === res.testId);
+        if (test) {
+          const stats = evaluateResult(res.responsesJson || {}, test.answerKey || {}, qbgMap, test.pattern);
+          subjStats = stats.subjectStats;
+        }
+      }
 
-    if (selectedCenterId) {
-      filtered = filtered.filter(r => r.centerId === selectedCenterId);
-    }
-    if (selectedBatchId) {
-      filtered = filtered.filter(r => r.batchId === selectedBatchId);
-    }
-    if (studentSearch) {
-      const search = studentSearch.toLowerCase();
-      filtered = filtered.filter(r => 
-        (r.studentName || '').toLowerCase().includes(search) || 
-        (r.regNo || '').toLowerCase().includes(search)
-      );
+      return {
+        ...res,
+        subjectStats: Array.isArray(subjStats) 
+          ? subjStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
+          : subjStats || {},
+      };
+    });
+
+    // Find all tests belonging to the selected program to build columns
+    let programResults = resolvedResults;
+    if (selectedProgramId) {
+      programResults = resolvedResults.filter(r => r.programId === selectedProgramId);
     }
 
     const uniqueTestsMap: Record<string, { testId: string, testName: string, testDate: string, timestamp: number }> = {};
-    filtered.forEach(res => {
+    programResults.forEach(res => {
       if (!res.testId) return;
       const tId = res.testId;
       if (!uniqueTestsMap[tId]) {
@@ -2834,40 +2875,130 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       }
     });
 
+    // Sort tests chronologically (newest to oldest)
     const chronTests = Object.values(uniqueTestsMap).sort((a, b) => {
       const dateCompare = (b.testDate || '').localeCompare(a.testDate || '');
       if (dateCompare !== 0) return dateCompare;
       return b.timestamp - a.timestamp;
     });
 
+    // Group all results by student.
     const studentMap: Record<string, {
       studentName: string;
       regNo: string;
+      batchId: string;
       batchName: string;
+      centerId: string;
       centerName: string;
+      programId: string;
+      type?: string;
+      rankTarget?: string;
+      targetYear?: string;
       testResults: Record<string, any>;
     }> = {};
 
-    filtered.forEach(res => {
+    resolvedResults.forEach(res => {
       const reg = res.regNo || '—';
       const key = `${reg}_${res.studentName}`;
       if (!studentMap[key]) {
         studentMap[key] = {
           studentName: res.studentName,
           regNo: reg,
+          batchId: res.batchId || '',
           batchName: res.batchName || '—',
+          centerId: res.centerId || '',
           centerName: res.centerName || '—',
+          programId: res.programId || '',
+          type: res.type || '',
+          rankTarget: res.rankTarget || '',
+          targetYear: res.targetYear || '',
           testResults: {}
         };
       }
       studentMap[key].testResults[res.testId] = res;
     });
 
+    // Filter students at student profile level to prevent past scores from being dropped
+    let filteredStudents = Object.values(studentMap);
+
+    if (selectedProgramId) {
+      filteredStudents = filteredStudents.filter(s => s.programId === selectedProgramId);
+    }
+    if (selectedCenterId) {
+      filteredStudents = filteredStudents.filter(s => s.centerId === selectedCenterId);
+    }
+    if (selectedBatchId) {
+      filteredStudents = filteredStudents.filter(s => s.batchId === selectedBatchId);
+    }
+    if (studentSearch) {
+      const search = studentSearch.toLowerCase();
+      filteredStudents = filteredStudents.filter(s => 
+        (s.studentName || '').toLowerCase().includes(search) || 
+        (s.regNo || '').toLowerCase().includes(search)
+      );
+    }
+
+    // Dynamic rank calculation per test across the filtered student list
+    const testToResults: Record<string, any[]> = {};
+    filteredStudents.forEach(student => {
+      Object.entries(student.testResults).forEach(([tId, res]) => {
+        if (!testToResults[tId]) testToResults[tId] = [];
+        testToResults[tId].push({ studentKey: `${student.regNo}_${student.studentName}`, ...res });
+      });
+    });
+
+    const testIdToStudentRanks: Record<string, Record<string, number>> = {};
+    Object.entries(testToResults).forEach(([tId, list]) => {
+      // Sort by score descending to rank. IsAbsent records are relegated to the bottom
+      const sorted = [...list].sort((a, b) => {
+        if (a.isAbsent && !b.isAbsent) return 1;
+        if (!a.isAbsent && b.isAbsent) return -1;
+        return (b.score || 0) - (a.score || 0);
+      });
+      const ranks: Record<string, number> = {};
+      sorted.forEach((res, idx) => {
+        ranks[res.studentKey] = idx + 1; // 1-based index rank
+      });
+      testIdToStudentRanks[tId] = ranks;
+    });
+
+    // Update ranks in student testResults objects
+    filteredStudents.forEach(student => {
+      const studentKey = `${student.regNo}_${student.studentName}`;
+      Object.keys(student.testResults).forEach(tId => {
+        const calculatedRank = testIdToStudentRanks[tId]?.[studentKey];
+        if (calculatedRank) {
+          student.testResults[tId].rank = calculatedRank;
+        }
+      });
+    });
+
+    // Sort students: Rank #1 of the current test (newest chronTests[0]) at the top!
+    const currentTestId = chronTests[0]?.testId;
+    const sortedStudents = [...filteredStudents].sort((a, b) => {
+      const resA = currentTestId ? a.testResults[currentTestId] : null;
+      const resB = currentTestId ? b.testResults[currentTestId] : null;
+
+      const absentA = !resA || resA.isAbsent;
+      const absentB = !resB || resB.isAbsent;
+
+      // Relegate absent students to the bottom
+      if (absentA && !absentB) return 1;
+      if (!absentA && absentB) return -1;
+      if (absentA && absentB) return a.studentName.localeCompare(b.studentName);
+
+      const rankA = resA.rank || 100000;
+      const rankB = resB.rank || 100000;
+
+      if (rankA !== rankB) return rankA - rankB;
+      return a.studentName.localeCompare(b.studentName);
+    });
+
     return {
       chronTests,
-      students: Object.values(studentMap).sort((a, b) => a.studentName.localeCompare(b.studentName))
+      students: sortedStudents
     };
-  }, [allCompResults, selectedCenterId, selectedBatchId, studentSearch]);
+  }, [allCompResults, selectedProgramId, selectedCenterId, selectedBatchId, studentSearch, tests, qbgMap]);
 
   const displayedTests = useMemo(() => {
     if (showAllHistoryTests) return comparisonGridData.chronTests;
@@ -4194,31 +4325,31 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               </div>
 
               {/* Spreadsheet Grid container */}
-              <Card className="rounded-[2rem] border border-slate-200 shadow-md bg-white overflow-hidden">
+              <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-xs text-left">
                     <thead>
                       {/* First Row Header Groups */}
-                      <tr className="bg-slate-900 text-white border-b border-slate-800">
-                        <th rowSpan={2} className="px-6 py-4 border-r border-slate-800 align-middle min-w-[240px] sticky left-0 bg-slate-900 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.15)]">
-                          <div className="text-xs font-black uppercase tracking-widest font-mono">Student Details</div>
-                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Name & Reg No</div>
+                      <tr className="bg-slate-950 text-white border-b border-slate-850">
+                        <th rowSpan={2} className="px-6 py-5 border-r-2 border-r-slate-800 align-middle min-w-[260px] sticky left-0 bg-slate-950 z-20 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
+                          <div className="text-xs font-black uppercase tracking-widest font-mono text-blue-400">Student Profile</div>
+                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Roll-No / Program Batch</div>
                         </th>
                         {displayedTests.map((testMeta, idx) => {
-                          const testLabel = idx === 0 ? 'Current Test' : idx === 1 ? 'Previous Test' : `Previous - ${idx} Test`;
+                          const testLabel = idx === 0 ? '🏆 Current Test' : idx === 1 ? '📅 Previous Test' : `⏱️ Previous - ${idx} Test`;
                           return (
                             <th 
                               key={testMeta.testId} 
                               colSpan={5} 
                               className={cn(
-                                "px-4 py-3 text-center border-r border-slate-800 font-black tracking-widest uppercase text-[10px] font-mono",
-                                idx === 0 ? "bg-blue-950/40 text-blue-300" : "bg-slate-950/20 text-slate-300"
+                                "px-4 py-3 text-center border-r-2 border-r-slate-800 font-extrabold tracking-widest uppercase text-[10px] font-mono",
+                                idx === 0 ? "bg-blue-950 text-blue-200" : "bg-slate-900 text-slate-300"
                               )}
                             >
-                              <div className="flex items-center justify-center gap-1.5 font-black text-xs">
+                              <div className="flex items-center justify-center gap-1.5 font-black text-[11px]">
                                 {testLabel}
                               </div>
-                              <div className="text-[9px] text-slate-400 font-bold normal-case tracking-tight mt-0.5 max-w-[220px] mx-auto truncate font-sans" title={testMeta.testName}>
+                              <div className="text-[10px] text-slate-400 font-semibold normal-case tracking-tight mt-0.5 max-w-[240px] mx-auto truncate font-sans" title={testMeta.testName}>
                                 {testMeta.testName || '—'}
                               </div>
                               <div className="text-[8px] text-slate-500 font-bold tracking-widest mt-0.5 font-mono">
@@ -4230,16 +4361,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                       </tr>
 
                       {/* Second Row Header Sub-columns */}
-                      <tr className="bg-slate-800 text-slate-200 border-b border-slate-700 font-black uppercase tracking-wider text-[9px] font-mono">
+                      <tr className="bg-slate-800 text-slate-200 border-b border-slate-700 font-bold uppercase tracking-wider text-[9px] font-mono">
                         {displayedTests.map((testMeta) => (
                           <React.Fragment key={testMeta.testId}>
-                            <th className="p-3 text-center border-r border-slate-700 w-12 text-slate-300">Ph</th>
-                            <th className="p-3 text-center border-r border-slate-700 w-12 text-slate-300">Ch</th>
-                            <th className="p-3 text-center border-r border-slate-700 w-24 text-blue-300">
-                              {isMedicalProgram ? 'botany zoology' : 'Math'}
+                            <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Physics</th>
+                            <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Chemistry</th>
+                            <th className="p-3 text-center border-r border-slate-700 w-28 text-blue-300">
+                              {isMedicalProgram ? 'Botany & Zoology' : 'Mathematics'}
                             </th>
-                            <th className="p-3 text-center border-r border-slate-700 min-w-[90px] text-white">All Detail</th>
-                            <th className="p-3 text-center border-r border-slate-700 w-12 text-amber-300">Rank</th>
+                            <th className="p-3 text-center border-r border-slate-700 min-w-[95px] text-white">Cumulative Marks</th>
+                            <th className="p-3 text-center border-r-2 border-r-slate-800 w-14 text-amber-400 bg-slate-900/40">Rank</th>
                           </React.Fragment>
                         ))}
                       </tr>
@@ -4247,21 +4378,38 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     <tbody className="divide-y divide-slate-100">
                       {comparisonGridData.students.map((studentItem) => {
                         return (
-                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/50 transition-all">
+                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20">
                             {/* Student Details sticky first column */}
-                            <td className="px-6 py-4.5 border-r border-slate-100 sticky left-0 bg-white z-10 shadow-[2px_0_5px_rgba(0,0,0,0.03)] hover:bg-slate-50">
-                              <div className="font-extrabold text-slate-950 text-xs tracking-tight font-sans">{studentItem.studentName}</div>
-                              <div className="flex items-center gap-2 mt-1">
-                                <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                            <td className="px-6 py-4.5 border-r-2 border-slate-300 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
+                              <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">{studentItem.studentName}</div>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                <span className="font-mono text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                   #{studentItem.regNo}
                                 </span>
-                                <span className="text-[9px] font-extrabold text-indigo-500 uppercase tracking-widest font-mono" title={studentItem.batchName}>
-                                  {studentItem.batchName && studentItem.batchName.length > 20 
-                                    ? studentItem.batchName.slice(0, 18) + '...' 
-                                    : studentItem.batchName}
+                                <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate max-w-[130px]" title={studentItem.batchName}>
+                                  {studentItem.batchName}
                                 </span>
                               </div>
-                              <div className="text-[8px] text-slate-400 font-bold uppercase mt-0.5 tracking-widest font-mono">{studentItem.centerName}</div>
+                              <div className="text-[8px] text-slate-400 font-extrabold uppercase mt-1 tracking-widest font-mono text-left">{studentItem.centerName}</div>
+                              
+                              {(studentItem.type || studentItem.rankTarget) && (
+                                <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                                  {studentItem.type && (
+                                    <span className="text-[8px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono">
+                                      {studentItem.type}
+                                    </span>
+                                  )}
+                                  {studentItem.rankTarget && (
+                                    <span className="text-[8px] font-black text-amber-750 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-widest font-mono inline-flex items-center gap-0.5">
+                                      <Target size={9} className="text-amber-600" />
+                                      {studentItem.rankTarget}
+                                      {studentItem.targetYear && (
+                                        <span className="text-slate-400 font-mono font-medium text-[7px]">({studentItem.targetYear})</span>
+                                      )}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </td>
 
                             {/* Chronological Test Columns */}
@@ -4271,9 +4419,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               if (!testRes) {
                                 return (
                                   <React.Fragment key={testMeta.testId}>
-                                    <td colSpan={5} className="p-3 text-center text-slate-300 italic font-medium bg-slate-50/30 border-r border-slate-100 font-sans">
-                                      Absent / Term not taken
-                                    </td>
+                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    <td className="p-3 text-center border-r border-slate-100 bg-slate-50/30 text-slate-350 italic font-medium font-sans text-[10px]">Absent</td>
+                                    <td className="p-3 text-center border-r-2 border-r-slate-300 bg-slate-50/40 text-slate-350 font-mono font-medium">—</td>
                                   </React.Fragment>
                                 );
                               }
@@ -4290,7 +4440,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 if (bot !== '—' || zoo !== '—') {
                                   thirdCellText = `B: ${bot} | Z: ${zoo}`;
                                 } else if (bio !== '—') {
-                                  thirdCellText = `Bio: ${bio}`;
+                                  thirdCellText = `Bi: ${bio}`;
                                 } else {
                                   thirdCellText = '—';
                                 }
@@ -4299,45 +4449,64 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               }
 
                               const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
-                              const maxScoreVal = testRes.maxScore || 360;
+                              const testObj = tests.find(t => t.id === testMeta.testId);
+                              const maxScoreVal = testObj?.maxScore || testRes.maxScore || (testObj?.pattern === 'NEET' || isMedicalProgram ? 720 : 360);
                               const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
                               const rankVal = testRes.rank ? `#${testRes.rank}` : '—';
 
                               return (
                                 <React.Fragment key={testMeta.testId}>
                                   {/* Physics */}
-                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-900 font-mono">
+                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-sm">
                                     {testRes.isAbsent ? '—' : phScore}
                                   </td>
                                   {/* Chemistry */}
-                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-900 font-mono">
+                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-sm">
                                     {testRes.isAbsent ? '—' : chScore}
                                   </td>
                                   {/* Math / botany zoology */}
                                   <td className={cn(
-                                    "p-3 text-center border-r border-slate-100 font-black whitespace-nowrap font-mono",
-                                    isMedicalProgram ? "text-slate-700 text-[10px]" : "text-indigo-600"
+                                    "p-3 text-center border-r border-slate-100 font-extrabold whitespace-nowrap font-mono text-sm",
+                                    isMedicalProgram ? "text-slate-600 text-[10px]" : "text-indigo-600"
                                   )}>
                                     {testRes.isAbsent ? '—' : thirdCellText}
                                   </td>
                                   {/* All Detail */}
-                                  <td className="p-3 text-center border-r border-slate-100 bg-blue-50/10 min-w-[90px]">
+                                  <td 
+                                    className={cn(
+                                      "p-3 text-center border-r border-slate-100 bg-blue-50/10 min-w-[95px] transition-colors",
+                                      !testRes.isAbsent && "cursor-pointer hover:bg-blue-100/60 group/cumulative"
+                                    )}
+                                    onClick={() => {
+                                      if (!testRes.isAbsent && onSelectResult) {
+                                        onSelectResult(testRes);
+                                      }
+                                    }}
+                                    title={!testRes.isAbsent ? "Click to view full result details breakdown" : undefined}
+                                  >
                                     {testRes.isAbsent ? (
                                       <span className="text-slate-300 italic text-[10px] font-sans">Absent</span>
                                     ) : (
                                       <div className="space-y-0.5">
-                                        <div className="font-extrabold text-slate-950 tracking-tighter text-xs font-mono">
+                                        <div className="font-extrabold text-slate-900 tracking-tighter text-xs font-mono group-hover/cumulative:text-blue-700 transition-colors">
                                           {scoreVal}
                                           <span className="text-[9px] font-bold text-slate-400">/{maxScoreVal}</span>
                                         </div>
-                                        <div className="text-[9.5px] font-extrabold text-emerald-600 leading-none font-mono">
+                                        <div className="text-[9.5px] font-black text-emerald-600 leading-none font-mono">
                                           {accuracyVal} Acc
                                         </div>
                                       </div>
                                     )}
                                   </td>
                                   {/* Rank */}
-                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-800 bg-slate-50/50 font-mono">
+                                  <td className={cn(
+                                    "p-3 text-center border-r-2 border-r-slate-350 font-black font-mono transition-colors",
+                                    testRes.isAbsent ? "text-slate-300 bg-slate-50/40" :
+                                    testRes.rank === 1 ? "bg-amber-100/70 text-amber-800" :
+                                    testRes.rank === 2 ? "bg-slate-100 text-slate-600" :
+                                    testRes.rank === 3 ? "bg-orange-100/70 text-orange-850" :
+                                    "bg-slate-50/30 text-slate-600"
+                                  )}>
                                     {testRes.isAbsent ? '—' : rankVal}
                                   </td>
                                 </React.Fragment>
