@@ -24,7 +24,8 @@ import {
   TrendingDown,
   Database,
   Trash2,
-  Layout
+  Layout,
+  Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomSheet } from './Students';
@@ -2412,7 +2413,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   onSelectAllTests?: (ids: string[]) => void
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
-  const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student'>('summary');
+  const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
+  const [selectedCompStudentReg, setSelectedCompStudentReg] = useState<string>('');
+  const [compHistory, setCompHistory] = useState<any[]>([]);
+  const [isLoadingCompHistory, setIsLoadingCompHistory] = useState(false);
+  const [allCompResults, setAllCompResults] = useState<any[]>([]);
+  const [isLoadingAllComp, setIsLoadingAllComp] = useState(false);
+  const [showAllHistoryTests, setShowAllHistoryTests] = useState(false);
+
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -2674,6 +2682,198 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     };
   }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig, selectedProgramId, selectedCenterId, selectedBatchId]);
 
+  useEffect(() => {
+    if (!selectedCompStudentReg && aggregateStats?.allStudents && aggregateStats.allStudents.length > 0) {
+      const firstWithReg = aggregateStats.allStudents.find((s: any) => s.regNo && s.regNo !== '—');
+      if (firstWithReg) {
+        setSelectedCompStudentReg(firstWithReg.regNo);
+      } else if (aggregateStats.allStudents[0]?.regNo) {
+        setSelectedCompStudentReg(aggregateStats.allStudents[0].regNo);
+      }
+    }
+  }, [aggregateStats, selectedCompStudentReg]);
+
+  useEffect(() => {
+    const fetchCompHistory = async () => {
+      if (!selectedCompStudentReg) {
+        setCompHistory([]);
+        return;
+      }
+      setIsLoadingCompHistory(true);
+      try {
+        const historyQuery = query(
+          collection(db, 'result_updated'),
+          where('regNo', '==', selectedCompStudentReg)
+        );
+        const snap = await getDocs(historyQuery);
+        const historyDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        
+        // Sort history chronologically by testDate (ascending)
+        const sorted = historyDocs.sort((a, b) => {
+          const dateCompare = (a.testDate || '').localeCompare(b.testDate || '');
+          if (dateCompare !== 0) return dateCompare;
+          const aTime = a.createdAt?.seconds || 0;
+          const bTime = b.createdAt?.seconds || 0;
+          return aTime - bTime;
+        });
+        setCompHistory(sorted);
+      } catch (err) {
+        console.error("Failed to load comparison student history:", err);
+      } finally {
+        setIsLoadingCompHistory(false);
+      }
+    };
+    fetchCompHistory();
+  }, [selectedCompStudentReg]);
+
+  useEffect(() => {
+    const fetchAllCompResults = async () => {
+      if (activeAnalysisView !== 'comparison') return;
+      setIsLoadingAllComp(true);
+      try {
+        let q;
+        if (selectedProgramId) {
+          q = query(
+            collection(db, 'result_updated'),
+            where('programId', '==', selectedProgramId)
+          );
+        } else {
+          q = query(collection(db, 'result_updated'));
+        }
+        const snap = await getDocs(q);
+        const docs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        setAllCompResults(docs);
+      } catch (err) {
+        console.error("Failed to load all comparison results for grid:", err);
+      } finally {
+        setIsLoadingAllComp(false);
+      }
+    };
+    fetchAllCompResults();
+  }, [selectedProgramId, activeAnalysisView]);
+
+  const isMedicalProgram = useMemo(() => {
+    if (!selectedProgramId) return false;
+    const prog = metaPrograms.find((p: any) => p.id === selectedProgramId);
+    if (!prog) return false;
+    const name = (prog.programName || '').toUpperCase();
+    const code = (prog.programCode || '').toUpperCase();
+    return name.includes('NEET') || name.includes('MED') || code.includes('NEET') || code.includes('MED');
+  }, [selectedProgramId, metaPrograms]);
+
+  const getSubjectScore = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): string | number => {
+    if (!res || !res.subjectStats || res.isAbsent) return '—';
+    const stats = res.subjectStats;
+    if (subType === 'Physics') {
+      const val = stats.Physics || stats.PHYSICS || stats.PH || stats.ph || stats.physics;
+      return val ? (val.score ?? '—') : '—';
+    }
+    if (subType === 'Chemistry') {
+      const val = stats.Chemistry || stats.CHEMISTRY || stats.CH || stats.ch || stats.chemistry;
+      return val ? (val.score ?? '—') : '—';
+    }
+    if (subType === 'Math') {
+      const val = stats.Math || stats.Maths || stats.Mathematics || stats.MATH || stats.mathematics || stats.MATHS;
+      return val ? (val.score ?? '—') : '—';
+    }
+    if (subType === 'Botany') {
+      const val = stats.Botany || stats.BOTANY || stats.botany || stats.BOT;
+      return val ? (val.score ?? '—') : '—';
+    }
+    if (subType === 'Zoology') {
+      const val = stats.Zoology || stats.ZOOLOGY || stats.zoology || stats.ZOO;
+      return val ? (val.score ?? '—') : '—';
+    }
+    if (subType === 'Biology') {
+      const val = stats.Biology || stats.BIOLOGY || stats.biology || stats.BIO || stats.bio;
+      return val ? (val.score ?? '—') : '—';
+    }
+    return '—';
+  };
+
+  const comparisonGridData = useMemo(() => {
+    let filtered = allCompResults.map(res => ({
+      ...res,
+      subjectStats: Array.isArray(res.subjectStats) 
+        ? res.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
+        : res.subjectStats || {},
+    }));
+
+    if (selectedCenterId) {
+      filtered = filtered.filter(r => r.centerId === selectedCenterId);
+    }
+    if (selectedBatchId) {
+      filtered = filtered.filter(r => r.batchId === selectedBatchId);
+    }
+    if (studentSearch) {
+      const search = studentSearch.toLowerCase();
+      filtered = filtered.filter(r => 
+        (r.studentName || '').toLowerCase().includes(search) || 
+        (r.regNo || '').toLowerCase().includes(search)
+      );
+    }
+
+    const uniqueTestsMap: Record<string, { testId: string, testName: string, testDate: string, timestamp: number }> = {};
+    filtered.forEach(res => {
+      if (!res.testId) return;
+      const tId = res.testId;
+      if (!uniqueTestsMap[tId]) {
+        uniqueTestsMap[tId] = {
+          testId: tId,
+          testName: res.testName || '',
+          testDate: res.testDate || '',
+          timestamp: res.createdAt?.seconds || 0
+        };
+      } else {
+        if (res.createdAt?.seconds && (!uniqueTestsMap[tId].timestamp || res.createdAt.seconds > uniqueTestsMap[tId].timestamp)) {
+          uniqueTestsMap[tId].timestamp = res.createdAt.seconds;
+        }
+        if (res.testDate && !uniqueTestsMap[tId].testDate) {
+          uniqueTestsMap[tId].testDate = res.testDate;
+        }
+      }
+    });
+
+    const chronTests = Object.values(uniqueTestsMap).sort((a, b) => {
+      const dateCompare = (b.testDate || '').localeCompare(a.testDate || '');
+      if (dateCompare !== 0) return dateCompare;
+      return b.timestamp - a.timestamp;
+    });
+
+    const studentMap: Record<string, {
+      studentName: string;
+      regNo: string;
+      batchName: string;
+      centerName: string;
+      testResults: Record<string, any>;
+    }> = {};
+
+    filtered.forEach(res => {
+      const reg = res.regNo || '—';
+      const key = `${reg}_${res.studentName}`;
+      if (!studentMap[key]) {
+        studentMap[key] = {
+          studentName: res.studentName,
+          regNo: reg,
+          batchName: res.batchName || '—',
+          centerName: res.centerName || '—',
+          testResults: {}
+        };
+      }
+      studentMap[key].testResults[res.testId] = res;
+    });
+
+    return {
+      chronTests,
+      students: Object.values(studentMap).sort((a, b) => a.studentName.localeCompare(b.studentName))
+    };
+  }, [allCompResults, selectedCenterId, selectedBatchId, studentSearch]);
+
+  const displayedTests = useMemo(() => {
+    if (showAllHistoryTests) return comparisonGridData.chronTests;
+    return comparisonGridData.chronTests.slice(0, 3);
+  }, [comparisonGridData.chronTests, showAllHistoryTests]);
+
   // Derived filter options
   const filterOptions = useMemo(() => {
     const s = new Set<string>();
@@ -2857,6 +3057,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             key={s.sKey}
                             onClick={() => {
                               setSelectedStudents(prev => [...prev, s.sKey]);
+                              if (s.regNo && s.regNo !== '—') {
+                                setSelectedCompStudentReg(s.regNo);
+                              }
                               setStudentSearch('');
                             }}
                             className="w-full flex items-center justify-between px-4 py-3 hover:bg-blue-50/50 transition-colors border-b border-slate-50 last:border-0 text-left"
@@ -2959,6 +3162,15 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               )}
             >
               Student-wise
+            </button>
+            <button 
+              onClick={() => setActiveAnalysisView('comparison')}
+              className={cn(
+                "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
+                activeAnalysisView === 'comparison' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              Test Comparison
             </button>
           </div>
         </div>
@@ -3793,6 +4005,364 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             </table>
           </div>
         </Card>
+      )}
+
+      {activeAnalysisView === 'comparison' && (
+        <div className="space-y-6">
+          {/* Main Comparison Filtering Header */}
+          <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-xl space-y-6">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="space-y-1">
+                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block font-mono">Comparative Matrices</span>
+                <h3 className="text-2xl font-black tracking-tight flex items-center gap-2">
+                  <TrendingUp className="text-blue-500" size={24} />
+                  Horizontal Student Test-on-Test Grid
+                </h3>
+                <p className="text-xs text-slate-400 font-medium font-sans">
+                  Chronological comparison grid with exact subject and total mark distribution breakdowns
+                </p>
+              </div>
+
+              {/* Toggle timeline span */}
+              <div className="flex items-center gap-2 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setShowAllHistoryTests(false)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                    !showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  Last 3 Tests
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAllHistoryTests(true)}
+                  className={cn(
+                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                    showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                  )}
+                >
+                  All History
+                </button>
+              </div>
+            </div>
+
+            {/* Program Level selector pills requested by user */}
+            <div className="space-y-3 pt-4 border-t border-slate-800">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block font-mono">Program Level Filter:</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedProgramId('');
+                    setSelectedBatchId('');
+                  }}
+                  className={cn(
+                    "px-4 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all",
+                    !selectedProgramId
+                      ? "bg-blue-600 text-white shadow-md shadow-blue-900/40"
+                      : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                  )}
+                >
+                  All Programs
+                </button>
+                {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
+                  <button
+                    type="button"
+                    key={p.id}
+                    onClick={() => {
+                      setSelectedProgramId(p.id);
+                      setSelectedBatchId(''); // reset batch
+                    }}
+                    className={cn(
+                      "px-4 py-2.5 rounded-xl text-xs font-black tracking-wider uppercase transition-all",
+                      selectedProgramId === p.id
+                        ? "bg-blue-600 text-white shadow-md shadow-blue-900/40"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-300"
+                    )}
+                  >
+                    {p.programName}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
+              {/* Search input inside panel */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 font-mono">Search Student:</label>
+                <div className="relative">
+                  <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
+                  <input
+                    type="text"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    placeholder="Type student name or regNo..."
+                    className="w-full h-10 bg-slate-800 text-white pl-10 pr-4 text-xs font-bold rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {studentSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setStudentSearch('')}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white font-bold text-xs"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Center Filter */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 font-mono">Select Center:</label>
+                <select
+                  value={selectedCenterId}
+                  onChange={(e) => setSelectedCenterId(e.target.value)}
+                  className="w-full h-10 bg-slate-800 text-white px-3 text-xs font-bold rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Academic Centers</option>
+                  {metaCenters.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.centerName}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Batch Filter */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 font-mono">Select Batch:</label>
+                <select
+                  value={selectedBatchId}
+                  onChange={(e) => setSelectedBatchId(e.target.value)}
+                  className="w-full h-10 bg-slate-800 text-white px-3 text-xs font-bold rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Program Batches</option>
+                  {metaBatches.filter((b: any) => !selectedProgramId || b.programId === selectedProgramId).map((b: any) => (
+                    <option key={b.id} value={b.id}>{b.batchCode || b.batchName}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {isLoadingAllComp ? (
+            <div className="py-24 flex flex-col items-center justify-center gap-3 bg-white rounded-3xl border border-slate-100 shadow-sm text-center">
+              <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mt-2">Loading historical results database...</p>
+              <p className="text-[10px] text-slate-400 font-medium">Please wait while the multi-test matrix is aligned and consolidated.</p>
+            </div>
+          ) : comparisonGridData.students.length === 0 ? (
+            <div className="py-24 flex flex-col items-center justify-center gap-4 bg-white rounded-[2rem] border border-slate-100 shadow-sm text-center px-4">
+              <div className="w-16 h-16 bg-slate-50 text-slate-400 rounded-3xl flex items-center justify-center">
+                <AlertCircle size={32} />
+              </div>
+              <div className="space-y-1">
+                <p className="text-base font-black text-slate-900">No Student Records Found</p>
+                <p className="text-xs text-slate-400 max-w-sm font-medium mx-auto">
+                  No scores match the selected program filters or student search parameters. Try choosing another Program Level, Center or resetting your search query.
+                </p>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={() => {
+                    setSelectedProgramId('');
+                    setSelectedBatchId('');
+                    setSelectedCenterId('');
+                    setStudentSearch('');
+                  }}
+                  className="text-[10px] font-black uppercase tracking-widest"
+                >
+                  Reset All Filters
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Alert diagnostic summary banner */}
+              <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3">
+                <Activity size={18} className="text-blue-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="text-xs font-black text-slate-900 uppercase tracking-wider font-mono">
+                    Grid Active: Consolidated {displayedTests.length} Tests for {comparisonGridData.students.length} Students
+                  </p>
+                  <p className="text-[11px] text-slate-500 font-medium font-sans">
+                    Horizontal alignments are built chronologically (newest to oldest). Subjects adjust dynamically between <strong>JEE (Math)</strong> & <strong>NEET (Botany & Zoology)</strong> depending on the program context.
+                  </p>
+                </div>
+              </div>
+
+              {/* Spreadsheet Grid container */}
+              <Card className="rounded-[2rem] border border-slate-200 shadow-md bg-white overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs text-left">
+                    <thead>
+                      {/* First Row Header Groups */}
+                      <tr className="bg-slate-900 text-white border-b border-slate-800">
+                        <th rowSpan={2} className="px-6 py-4 border-r border-slate-800 align-middle min-w-[240px] sticky left-0 bg-slate-900 z-10 shadow-[2px_0_5px_rgba(0,0,0,0.15)]">
+                          <div className="text-xs font-black uppercase tracking-widest font-mono">Student Details</div>
+                          <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Name & Reg No</div>
+                        </th>
+                        {displayedTests.map((testMeta, idx) => {
+                          const testLabel = idx === 0 ? 'Current Test' : idx === 1 ? 'Previous Test' : `Previous - ${idx} Test`;
+                          return (
+                            <th 
+                              key={testMeta.testId} 
+                              colSpan={5} 
+                              className={cn(
+                                "px-4 py-3 text-center border-r border-slate-800 font-black tracking-widest uppercase text-[10px] font-mono",
+                                idx === 0 ? "bg-blue-950/40 text-blue-300" : "bg-slate-950/20 text-slate-300"
+                              )}
+                            >
+                              <div className="flex items-center justify-center gap-1.5 font-black text-xs">
+                                {testLabel}
+                              </div>
+                              <div className="text-[9px] text-slate-400 font-bold normal-case tracking-tight mt-0.5 max-w-[220px] mx-auto truncate font-sans" title={testMeta.testName}>
+                                {testMeta.testName || '—'}
+                              </div>
+                              <div className="text-[8px] text-slate-500 font-bold tracking-widest mt-0.5 font-mono">
+                                DATE: {testMeta.testDate || '—'}
+                              </div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+
+                      {/* Second Row Header Sub-columns */}
+                      <tr className="bg-slate-800 text-slate-200 border-b border-slate-700 font-black uppercase tracking-wider text-[9px] font-mono">
+                        {displayedTests.map((testMeta) => (
+                          <React.Fragment key={testMeta.testId}>
+                            <th className="p-3 text-center border-r border-slate-700 w-12 text-slate-300">Ph</th>
+                            <th className="p-3 text-center border-r border-slate-700 w-12 text-slate-300">Ch</th>
+                            <th className="p-3 text-center border-r border-slate-700 w-24 text-blue-300">
+                              {isMedicalProgram ? 'botany zoology' : 'Math'}
+                            </th>
+                            <th className="p-3 text-center border-r border-slate-700 min-w-[90px] text-white">All Detail</th>
+                            <th className="p-3 text-center border-r border-slate-700 w-12 text-amber-300">Rank</th>
+                          </React.Fragment>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {comparisonGridData.students.map((studentItem) => {
+                        return (
+                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/50 transition-all">
+                            {/* Student Details sticky first column */}
+                            <td className="px-6 py-4.5 border-r border-slate-100 sticky left-0 bg-white z-10 shadow-[2px_0_5px_rgba(0,0,0,0.03)] hover:bg-slate-50">
+                              <div className="font-extrabold text-slate-950 text-xs tracking-tight font-sans">{studentItem.studentName}</div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="font-mono text-[9px] font-bold text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">
+                                  #{studentItem.regNo}
+                                </span>
+                                <span className="text-[9px] font-extrabold text-indigo-500 uppercase tracking-widest font-mono" title={studentItem.batchName}>
+                                  {studentItem.batchName && studentItem.batchName.length > 20 
+                                    ? studentItem.batchName.slice(0, 18) + '...' 
+                                    : studentItem.batchName}
+                                </span>
+                              </div>
+                              <div className="text-[8px] text-slate-400 font-bold uppercase mt-0.5 tracking-widest font-mono">{studentItem.centerName}</div>
+                            </td>
+
+                            {/* Chronological Test Columns */}
+                            {displayedTests.map((testMeta) => {
+                              const testRes = studentItem.testResults[testMeta.testId];
+                              
+                              if (!testRes) {
+                                return (
+                                  <React.Fragment key={testMeta.testId}>
+                                    <td colSpan={5} className="p-3 text-center text-slate-300 italic font-medium bg-slate-50/30 border-r border-slate-100 font-sans">
+                                      Absent / Term not taken
+                                    </td>
+                                  </React.Fragment>
+                                );
+                              }
+
+                              const phScore = getSubjectScore(testRes, 'Physics');
+                              const chScore = getSubjectScore(testRes, 'Chemistry');
+                              
+                              // Handle botany zoology details combined cell
+                              let thirdCellText = '';
+                              if (isMedicalProgram) {
+                                const bot = getSubjectScore(testRes, 'Botany');
+                                const zoo = getSubjectScore(testRes, 'Zoology');
+                                const bio = getSubjectScore(testRes, 'Biology');
+                                if (bot !== '—' || zoo !== '—') {
+                                  thirdCellText = `B: ${bot} | Z: ${zoo}`;
+                                } else if (bio !== '—') {
+                                  thirdCellText = `Bio: ${bio}`;
+                                } else {
+                                  thirdCellText = '—';
+                                }
+                              } else {
+                                thirdCellText = String(getSubjectScore(testRes, 'Math'));
+                              }
+
+                              const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
+                              const maxScoreVal = testRes.maxScore || 360;
+                              const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
+                              const rankVal = testRes.rank ? `#${testRes.rank}` : '—';
+
+                              return (
+                                <React.Fragment key={testMeta.testId}>
+                                  {/* Physics */}
+                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-900 font-mono">
+                                    {testRes.isAbsent ? '—' : phScore}
+                                  </td>
+                                  {/* Chemistry */}
+                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-900 font-mono">
+                                    {testRes.isAbsent ? '—' : chScore}
+                                  </td>
+                                  {/* Math / botany zoology */}
+                                  <td className={cn(
+                                    "p-3 text-center border-r border-slate-100 font-black whitespace-nowrap font-mono",
+                                    isMedicalProgram ? "text-slate-700 text-[10px]" : "text-indigo-600"
+                                  )}>
+                                    {testRes.isAbsent ? '—' : thirdCellText}
+                                  </td>
+                                  {/* All Detail */}
+                                  <td className="p-3 text-center border-r border-slate-100 bg-blue-50/10 min-w-[90px]">
+                                    {testRes.isAbsent ? (
+                                      <span className="text-slate-300 italic text-[10px] font-sans">Absent</span>
+                                    ) : (
+                                      <div className="space-y-0.5">
+                                        <div className="font-extrabold text-slate-950 tracking-tighter text-xs font-mono">
+                                          {scoreVal}
+                                          <span className="text-[9px] font-bold text-slate-400">/{maxScoreVal}</span>
+                                        </div>
+                                        <div className="text-[9.5px] font-extrabold text-emerald-600 leading-none font-mono">
+                                          {accuracyVal} Acc
+                                        </div>
+                                      </div>
+                                    )}
+                                  </td>
+                                  {/* Rank */}
+                                  <td className="p-3 text-center border-r border-slate-100 font-black text-slate-800 bg-slate-50/50 font-mono">
+                                    {testRes.isAbsent ? '—' : rankVal}
+                                  </td>
+                                </React.Fragment>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+
+              {/* Grid Pagination / Bottom Stats footnote */}
+              <div className="flex flex-col md:flex-row justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 gap-3">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
+                  Gurukul Analytical Engine &copy; Multi-Student Cumulative Matrix
+                </span>
+                <span className="text-[10px] text-slate-500 font-extrabold font-mono">
+                  Showing {comparisonGridData.students.length} Student rows across {displayedTests.length} tests. Scroll horizontally to view the full progression track.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

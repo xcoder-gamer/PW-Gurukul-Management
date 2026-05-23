@@ -4,6 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
+    <script>
+      // Silence benign Vite HMR websocket connection errors that occur in proxy/sandbox preview environments
+      window.addEventListener('unhandledrejection', function(event) {
+        if (event.reason) {
+          var msg = event.reason.message || String(event.reason);
+          if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1 || msg.indexOf('vite') !== -1 || msg.indexOf('Vite') !== -1) {
+            event.preventDefault();
+            console.warn('Silenced benign sandbox websocket rejection:', msg);
+          }
+        }
+      });
+      window.addEventListener('error', function(event) {
+        if (event.message) {
+          var msg = event.message;
+          if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('websocket') !== -1 || msg.indexOf('vite') !== -1 || msg.indexOf('Vite') !== -1) {
+            event.preventDefault();
+            console.warn('Silenced benign sandbox websocket error:', msg);
+          }
+        }
+      }, true);
+    </script>
   </head>
   <body>
     <div id="root"></div>
