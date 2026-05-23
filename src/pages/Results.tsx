@@ -3812,20 +3812,30 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     subject: 'all'
   });
 
+  // Live evaluation for display consistency
+  const activeStats = useMemo(() => {
+    return test ? evaluateResult(result.responsesJson || {}, test.answerKey || {}, qbgTopics, test.pattern) : null;
+  }, [test, result.responsesJson, qbgTopics]);
+
   const normalizedResult = useMemo(() => {
-    return {
+    const source = activeStats ? {
       ...result,
-      subjectStats: Array.isArray(result.subjectStats) 
-        ? result.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
-        : result.subjectStats,
-      chapterStats: Array.isArray(result.chapterStats)
-        ? result.chapterStats.reduce((acc: any, c: any) => ({ ...acc, [c.name]: c }), {})
-        : result.chapterStats,
-      difficultyStats: Array.isArray(result.difficultyStats)
-        ? result.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
-        : result.difficultyStats
+      ...activeStats
+    } : result;
+
+    return {
+      ...source,
+      subjectStats: Array.isArray(source.subjectStats) 
+        ? source.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
+        : source.subjectStats,
+      chapterStats: Array.isArray(source.chapterStats)
+        ? source.chapterStats.reduce((acc: any, c: any) => ({ ...acc, [c.name]: c }), {})
+        : source.chapterStats,
+      difficultyStats: Array.isArray(source.difficultyStats)
+        ? source.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
+        : source.difficultyStats
     };
-  }, [result]);
+  }, [result, activeStats]);
 
   const coreSubjects = useMemo(() => {
     const stats = normalizedResult.subjectStats || {};
@@ -3909,18 +3919,19 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
 
   useEffect(() => {
     const checkAutoSync = async () => {
-      if (test && result && !isSyncing) {
+      if (test && result && !isSyncing && activeStats) {
         const testVer = test.answerKeyVersion || 0;
         const resVer = result.answerKeyVersion || 0;
         
-        if (testVer > resVer) {
-          console.log(`Auto-syncing scorecard: Test version ${testVer} > Result version ${resVer}`);
+        // Auto-sync if version is stale OR if live evaluation score/counts do not match database counts (meaning rules updated)
+        if (testVer > resVer || activeStats.score !== result.score || activeStats.correct !== result.correct || activeStats.wrong !== result.wrong) {
+          console.log(`Auto-syncing scorecard: Mismatch detected or version stale. Live: ${activeStats.score} | DB: ${result.score}`);
           handleSync();
         }
       }
     };
     checkAutoSync();
-  }, [test, result.id]);
+  }, [test, result.id, activeStats]);
 
   const handleSync = async () => {
     if (!test || !result.id) return;
@@ -3964,9 +3975,8 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     }
   };
 
-  // Live evaluation for display consistency
-  const activeStats = test ? evaluateResult(result.responsesJson || {}, test.answerKey || {}, {}, test.pattern) : null;
-  const evaluationToUse = result.mappedEvaluation || activeStats?.mappedEvaluation || [];
+  // Prefer live evaluation if calculated, fallback to saved
+  const evaluationToUse = activeStats?.mappedEvaluation || result.mappedEvaluation || [];
   
   const filteredEvaluation = useMemo(() => {
     let list = [...evaluationToUse];
@@ -3982,10 +3992,10 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
     return list;
   }, [evaluationToUse, omrFilter]);
 
-  const currentScore = result.score || activeStats?.score || 0;
-  const currentCorrect = result.correct || activeStats?.correct || 0;
-  const currentWrong = result.wrong || activeStats?.wrong || 0;
-  const currentAccuracy = result.accuracy || activeStats?.accuracy || 0;
+  const currentScore = activeStats !== null ? activeStats.score : (result.score || 0);
+  const currentCorrect = activeStats !== null ? activeStats.correct : (result.correct || 0);
+  const currentWrong = activeStats !== null ? activeStats.wrong : (result.wrong || 0);
+  const currentAccuracy = activeStats !== null ? activeStats.accuracy : (result.accuracy || 0);
 
   const handleExportDetail = () => {
     const exportData = [
@@ -4361,17 +4371,17 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                            const cleanQNum = ev.qIdx.split('-').pop();
                            return (
                             <div key={ev.qIdx} className="flex flex-col items-center gap-1.5 p-1 rounded-xl transition-all hover:bg-slate-50 group relative">
-                              <span className="text-[9px] font-black text-slate-400 leading-none">Q.{cleanQNum}</span>
-                              <div className={cn(
-                                "w-10 h-10 rounded-full border-2 flex flex-col items-center justify-center text-[11px] font-bold transition-all relative",
+                               <span className="text-[9px] font-black text-slate-400 leading-none">Q.{cleanQNum}</span>
+                               <div className={cn(
+                                "min-w-10 px-2.5 h-10 rounded-full border-2 flex flex-col items-center justify-center text-[11px] font-bold transition-all relative",
                                 ev.status === 'blank' ? "bg-slate-50 border-slate-200 text-slate-400" :
                                 ev.status === 'correct' 
                                   ? "bg-emerald-50 border-emerald-200 text-emerald-600" 
                                   : (ev.status === 'partial' ? "bg-amber-50 border-amber-200 text-amber-600" : "bg-rose-50 border-rose-200 text-rose-600")
                               )}>
-                                <span className="leading-none">{ev.status === 'blank' ? '?' : ev.studentAns}</span>
+                                <span className="leading-none whitespace-nowrap truncate max-w-[55px]">{ev.status === 'blank' ? '?' : ev.studentAns}</span>
                                 {ev.status !== 'correct' && ev.status !== 'blank' && (
-                                  <span className="text-[7px] opacity-60 font-black mt-0.5 border-t border-current pt-0.5 px-1">{ev.correctAns}</span>
+                                  <span className="text-[7px] opacity-60 font-black mt-0.5 border-t border-current pt-0.5 px-1 whitespace-nowrap truncate max-w-[65px]">{ev.correctAns}</span>
                                 )}
                                 
                                 {/* Score indicator */}
