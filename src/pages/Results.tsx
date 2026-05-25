@@ -3281,6 +3281,86 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     document.body.removeChild(link);
   };
 
+  const handleExportComparisonCSV = () => {
+    if (comparisonGridData.students.length === 0) {
+      toast.error('No student data to export');
+      return;
+    }
+
+    const exportData: any[] = [];
+    comparisonGridData.students.forEach(student => {
+      const row: any = {
+        'Student Name': student.studentName,
+        'Registration No': student.regNo,
+        'Batch': student.batchName,
+        'Center': student.centerName,
+        'Student Type': student.type || '—',
+        'Target': student.rankTarget || '—',
+      };
+
+      displayedTests.forEach((testMeta, idx) => {
+        const testRes = student.testResults[testMeta.testId];
+        const labelPrefix = idx === 0 ? 'Current Test' : `Previous Test - ${idx}`;
+        const testName = testMeta.testName || 'Unknown';
+        
+        if (!testRes) {
+          row[`${labelPrefix} (${testName}) - Status`] = 'Absent';
+          row[`${labelPrefix} (${testName}) - Physics`] = '—';
+          row[`${labelPrefix} (${testName}) - Chemistry`] = '—';
+          row[`${labelPrefix} (${testName}) - Botany/Zoology/Math`] = '—';
+          row[`${labelPrefix} (${testName}) - Score`] = '—';
+          row[`${labelPrefix} (${testName}) - Accuracy`] = '—';
+          row[`${labelPrefix} (${testName}) - Rank`] = '—';
+        } else {
+          const phScore = getSubjectScore(testRes, 'Physics');
+          const chScore = getSubjectScore(testRes, 'Chemistry');
+          let thirdCellText = '';
+          if (isMedicalProgram) {
+            const bot = getSubjectScore(testRes, 'Botany');
+            const zoo = getSubjectScore(testRes, 'Zoology');
+            const bio = getSubjectScore(testRes, 'Biology');
+            if (bot !== '—' || zoo !== '—') {
+              thirdCellText = `B: ${bot} | Z: ${zoo}`;
+            } else if (bio !== '—') {
+              thirdCellText = `Bi: ${bio}`;
+            } else {
+              thirdCellText = '—';
+            }
+          } else {
+            thirdCellText = String(getSubjectScore(testRes, 'Math'));
+          }
+
+          const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
+          const testObj = tests.find(t => t.id === testMeta.testId);
+          const maxScoreVal = testObj?.maxScore || testRes.maxScore || (testObj?.pattern === 'NEET' || isMedicalProgram ? 720 : 360);
+          const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
+          const rankVal = testRes.rank ? `#${testRes.rank}` : '—';
+
+          row[`${labelPrefix} (${testName}) - Status`] = testRes.isAbsent ? 'Absent' : 'Present';
+          row[`${labelPrefix} (${testName}) - Physics`] = testRes.isAbsent ? '—' : phScore;
+          row[`${labelPrefix} (${testName}) - Chemistry`] = testRes.isAbsent ? '—' : chScore;
+          row[`${labelPrefix} (${testName}) - Botany/Zoology/Math`] = testRes.isAbsent ? '—' : thirdCellText;
+          row[`${labelPrefix} (${testName}) - Cumulative Score`] = testRes.isAbsent ? '—' : `${scoreVal}/${maxScoreVal}`;
+          row[`${labelPrefix} (${testName}) - Accuracy`] = testRes.isAbsent ? '—' : accuracyVal;
+          row[`${labelPrefix} (${testName}) - Rank`] = testRes.isAbsent ? '—' : rankVal;
+        }
+      });
+
+      exportData.push(row);
+    });
+
+    const csv = Papa.unparse(exportData);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Comparison_Grid_${new Date().getTime()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -4354,9 +4434,115 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       )}
 
       {activeAnalysisView === 'comparison' && (
-        <div className="space-y-6">
+        <div className="space-y-6 print-comparison-matrix">
+          {/* Dynamic Print Landscape CSS override for multi-student grid print */}
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              @page {
+                size: landscape !important;
+                margin: 8mm 6mm !important;
+              }
+              
+              body, html, #root {
+                background: #ffffff !important;
+                color: #000000 !important;
+                width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+              }
+
+              /* Hide screen-specific interactive panels completely */
+              aside, nav, header, button, select, input, .no-print, .toaster, [role="status"],
+              .print-hide, .main-filters-header {
+                display: none !important;
+              }
+
+              /* Expand container wrapping class to fit natural page */
+              .print-comparison-matrix {
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+                display: block !important;
+              }
+
+              /* Force grid overflow to be visible and unconstrained */
+              .print-comparison-matrix .overflow-x-auto {
+                overflow: visible !important;
+                max-height: none !important;
+                max-width: none !important;
+                width: 100% !important;
+              }
+
+              /* Drop thick screen shadow curves */
+              .shadow-xl, .shadow-2xl, .shadow-sm, .shadow-md {
+                box-shadow: none !important;
+              }
+
+              .rounded-[2rem], .rounded-3xl, .rounded-[2.5rem] {
+                border-radius: 0.5rem !important;
+                border: 1px solid #cbd5e1 !important;
+              }
+
+              /* Strip left student column and header stickiness to avoid clipping on print pages */
+              .print-comparison-matrix th.sticky,
+              .print-comparison-matrix td.sticky,
+              .print-comparison-matrix .sticky {
+                position: relative !important;
+                left: auto !important;
+                background-color: #f8fafc !important;
+                color: #0d1526 !important;
+                box-shadow: none !important;
+              }
+              
+              .print-comparison-matrix tr {
+                page-break-inside: avoid !important;
+              }
+
+              /* Explicit solid light gray grid borders for standard laser printing */
+              .print-comparison-matrix table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+                page-break-inside: auto !important;
+              }
+
+              .print-comparison-matrix td,
+              .print-comparison-matrix th {
+                border: 1px solid #94a3b8 !important;
+                padding: 5px 3px !important;
+                text-align: center !important;
+                font-size: 9px !important;
+              }
+
+              .print-comparison-matrix td:first-child {
+                text-align: left !important;
+                font-size: 10px !important;
+                font-weight: 800 !important;
+              }
+            }
+          ` }} />
+
+          {/* Printable Brand Header for Comparison Grid Report */}
+          <div className="hidden print:flex items-center justify-between border-b pb-4 mb-4 border-slate-300">
+            <div className="space-y-1 text-left">
+              <h1 className="text-xl font-black text-slate-900 tracking-tight">PW GURUKUL ACADEMY</h1>
+              <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest leading-none">
+                Consolidated Student Performance Tracking & Comparative Matrix
+              </p>
+              <p className="text-[9px] font-bold text-slate-500 font-mono mt-1">
+                {selectedProgramId ? `PROGRAM: ${metaPrograms.find((p: any) => p.id === selectedProgramId)?.programName || 'Unknown'}` : 'All Academic Programs'}
+                {selectedBatchId && ` | BATCH: ${metaBatches.find((b: any) => b.id === selectedBatchId)?.batchCode || 'Unknown'}`}
+                {selectedCenterId && ` | CENTER: ${metaCenters.find((c: any) => c.id === selectedCenterId)?.centerName || 'Unknown'}`}
+              </p>
+            </div>
+            <div className="text-right space-y-0.5">
+              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">Official Report</p>
+              <p className="text-xs font-bold text-slate-800">{new Date().toLocaleDateString()}</p>
+              <p className="text-[8px] text-slate-500 font-mono">Consolidated {displayedTests.length} Tests</p>
+            </div>
+          </div>
+
           {/* Main Comparison Filtering Header */}
-          <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-xl space-y-6">
+          <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-xl space-y-6 main-filters-header print:hidden">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div className="space-y-1">
                 <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block font-mono">Comparative Matrices</span>
@@ -4369,28 +4555,52 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 </p>
               </div>
 
-              {/* Toggle timeline span */}
-              <div className="flex items-center gap-2 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700">
-                <button
-                  type="button"
-                  onClick={() => setShowAllHistoryTests(false)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                    !showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
-                  )}
-                >
-                  Last 3 Tests
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAllHistoryTests(true)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                    showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
-                  )}
-                >
-                  All History
-                </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Toggle timeline span */}
+                <div className="flex items-center gap-2 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setShowAllHistoryTests(false)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      !showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Last 3 Tests
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllHistoryTests(true)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    All History
+                  </button>
+                </div>
+
+                {/* Print/Export buttons */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleExportComparisonCSV}
+                    className="border-slate-700 hover:bg-slate-800 text-white font-black uppercase text-[10px] tracking-widest h-10 px-4 rounded-xl flex items-center gap-1.5"
+                  >
+                    <Download size={14} className="text-slate-400" />
+                    Export CSV
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => window.print()}
+                    className="bg-red-650 hover:bg-red-700 text-white border-none font-black uppercase text-[10px] tracking-widest h-10 px-4 rounded-xl flex items-center gap-1.5 shadow-lg shadow-red-900/40"
+                  >
+                    <FileText size={14} className="text-red-200" />
+                    Export PDF
+                  </Button>
+                </div>
               </div>
             </div>
 
