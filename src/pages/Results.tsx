@@ -2607,7 +2607,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [isLoadingCompHistory, setIsLoadingCompHistory] = useState(false);
   const [allCompResults, setAllCompResults] = useState<any[]>([]);
   const [isLoadingAllComp, setIsLoadingAllComp] = useState(false);
-  const [showAllHistoryTests, setShowAllHistoryTests] = useState(false);
+  const [comparisonTestMode, setComparisonTestMode] = useState<'current' | 'two' | 'three' | 'all'>('three');
 
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
@@ -3200,9 +3200,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   }, [allCompResults, selectedProgramId, selectedCenterId, selectedBatchId, studentSearch, tests, qbgMap]);
 
   const displayedTests = useMemo(() => {
-    if (showAllHistoryTests) return comparisonGridData.chronTests;
-    return comparisonGridData.chronTests.slice(0, 3);
-  }, [comparisonGridData.chronTests, showAllHistoryTests]);
+    if (comparisonTestMode === 'current') return comparisonGridData.chronTests.slice(0, 1);
+    if (comparisonTestMode === 'two') return comparisonGridData.chronTests.slice(0, 2);
+    if (comparisonTestMode === 'three') return comparisonGridData.chronTests.slice(0, 3);
+    return comparisonGridData.chronTests; // 'all'
+  }, [comparisonGridData.chronTests, comparisonTestMode]);
 
   // Derived filter options
   const filterOptions = useMemo(() => {
@@ -4524,10 +4526,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           {/* Printable Brand Header for Comparison Grid Report */}
           <div className="hidden print:flex items-center justify-between border-b pb-4 mb-4 border-slate-300">
             <div className="space-y-1 text-left">
-              <h1 className="text-xl font-black text-slate-900 tracking-tight">PW GURUKUL ACADEMY</h1>
-              <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest leading-none">
+              <h1 className="text-base font-black uppercase tracking-wider text-slate-800">
                 Consolidated Student Performance Tracking & Comparative Matrix
-              </p>
+              </h1>
               <p className="text-[9px] font-bold text-slate-500 font-mono mt-1">
                 {selectedProgramId ? `PROGRAM: ${metaPrograms.find((p: any) => p.id === selectedProgramId)?.programName || 'Unknown'}` : 'All Academic Programs'}
                 {selectedBatchId && ` | BATCH: ${metaBatches.find((b: any) => b.id === selectedBatchId)?.batchCode || 'Unknown'}`}
@@ -4557,23 +4558,43 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
               <div className="flex flex-wrap items-center gap-3">
                 {/* Toggle timeline span */}
-                <div className="flex items-center gap-2 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700">
+                <div className="flex flex-wrap items-center gap-1.5 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700">
                   <button
                     type="button"
-                    onClick={() => setShowAllHistoryTests(false)}
+                    onClick={() => setComparisonTestMode('current')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                      !showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                      "px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      comparisonTestMode === 'current' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Current Test
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComparisonTestMode('two')}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      comparisonTestMode === 'two' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Current & Previous
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setComparisonTestMode('three')}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      comparisonTestMode === 'three' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
                     )}
                   >
                     Last 3 Tests
                   </button>
                   <button
                     type="button"
-                    onClick={() => setShowAllHistoryTests(true)}
+                    onClick={() => setComparisonTestMode('all')}
                     className={cn(
-                      "px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
-                      showAllHistoryTests ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
+                      "px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                      comparisonTestMode === 'all' ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"
                     )}
                   >
                     All History
@@ -4737,7 +4758,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           ) : (
             <div className="space-y-4">
               {/* Alert diagnostic summary banner */}
-              <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3">
+              <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3 print:hidden">
                 <Activity size={18} className="text-blue-600 shrink-0 mt-0.5" />
                 <div className="space-y-0.5">
                   <p className="text-xs font-black text-slate-900 uppercase tracking-wider font-mono">
