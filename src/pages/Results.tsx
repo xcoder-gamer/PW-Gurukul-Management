@@ -3343,64 +3343,127 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
     const exportData: any[] = [];
     comparisonGridData.students.forEach(student => {
-      const row: any = {
-        'Student Name': student.studentName,
-        'Registration No': student.regNo,
-        'Batch': student.batchName,
-        'Center': student.centerName,
-        'Student Type': student.type || '—',
-        'Target': student.rankTarget || '—',
-      };
-
-      displayedTests.forEach((testMeta, idx) => {
+      displayedTests.forEach((testMeta) => {
         const testRes = student.testResults[testMeta.testId];
-        const labelPrefix = idx === 0 ? 'Current Test' : `Previous Test - ${idx}`;
-        const testName = testMeta.testName || 'Unknown';
-        
+        const testObj = tests.find(t => t.id === testMeta.testId);
+
+        const row: any = {
+          'Student Name': student.studentName,
+          'Registration No': student.regNo,
+          'Center': student.centerName || '—',
+          'Batch': student.batchName || '—',
+          'Student Type': student.type || '—',
+          'Rank Target': student.rankTarget || '—',
+          'Test Name': testMeta.testName || 'Unknown',
+          'Test Date': testMeta.testDate || '—',
+        };
+
         if (!testRes) {
-          row[`${labelPrefix} (${testName}) - Status`] = 'Absent';
-          row[`${labelPrefix} (${testName}) - Physics`] = '—';
-          row[`${labelPrefix} (${testName}) - Chemistry`] = '—';
-          row[`${labelPrefix} (${testName}) - Botany/Zoology/Math`] = '—';
-          row[`${labelPrefix} (${testName}) - Score`] = '—';
-          row[`${labelPrefix} (${testName}) - Accuracy`] = '—';
-          row[`${labelPrefix} (${testName}) - Rank`] = '—';
+          row['Status'] = 'Absent';
+
+          row['Physics Correct Qs'] = '—';
+          row['Physics Incorrect Qs'] = '—';
+          row['Physics Unattempted Qs'] = '—';
+          row['Physics Score'] = '—';
+
+          row['Chemistry Correct Qs'] = '—';
+          row['Chemistry Incorrect Qs'] = '—';
+          row['Chemistry Unattempted Qs'] = '—';
+          row['Chemistry Score'] = '—';
+
+          row['Botany Correct Qs'] = '—';
+          row['Botany Incorrect Qs'] = '—';
+          row['Botany Unattempted Qs'] = '—';
+          row['Botany Score'] = '—';
+
+          row['Zoology Correct Qs'] = '—';
+          row['Zoology Incorrect Qs'] = '—';
+          row['Zoology Unattempted Qs'] = '—';
+          row['Zoology Score'] = '—';
+
+          row['Biology Correct Qs'] = '—';
+          row['Biology Incorrect Qs'] = '—';
+          row['Biology Unattempted Qs'] = '—';
+          row['Biology Score'] = '—';
+
+          row['Mathematics Correct Qs'] = '—';
+          row['Mathematics Incorrect Qs'] = '—';
+          row['Mathematics Unattempted Qs'] = '—';
+          row['Mathematics Score'] = '—';
+
+          row['Total Correct Qs'] = '—';
+          row['Total Incorrect Qs'] = '—';
+          row['Total Unattempted Qs'] = '—';
+          row['Total Score'] = '—';
+          row['% Score'] = '—';
+          row['Center Rank'] = '—';
+          row['Predicted Rank'] = '—';
         } else {
-          const phScore = getSubjectScore(testRes, 'Physics');
-          const chScore = getSubjectScore(testRes, 'Chemistry');
-          let thirdCellText = '';
-          if (isMedicalProgram) {
-            const bot = getSubjectScore(testRes, 'Botany');
-            const zoo = getSubjectScore(testRes, 'Zoology');
-            const bio = getSubjectScore(testRes, 'Biology');
-            if (bot !== '—' || zoo !== '—') {
-              thirdCellText = `B: ${bot} | Z: ${zoo}`;
-            } else if (bio !== '—') {
-              thirdCellText = `Bi: ${bio}`;
-            } else {
-              thirdCellText = '—';
-            }
-          } else {
-            thirdCellText = String(getSubjectScore(testRes, 'Math'));
-          }
+          row['Status'] = 'Present';
 
-          const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
-          const testObj = tests.find(t => t.id === testMeta.testId);
+          const phy = getRawSubjectObj(testRes, 'Physics');
+          const chem = getRawSubjectObj(testRes, 'Chemistry');
+          const bot = getRawSubjectObj(testRes, 'Botany');
+          const zoo = getRawSubjectObj(testRes, 'Zoology');
+          const bio = getRawSubjectObj(testRes, 'Biology');
+          const math = getRawSubjectObj(testRes, 'Math');
+
+          const phyScore = getSubjectScore(testRes, 'Physics');
+          const chemScore = getSubjectScore(testRes, 'Chemistry');
+          const botScore = getSubjectScore(testRes, 'Botany');
+          const zooScore = getSubjectScore(testRes, 'Zoology');
+          const bioScore = getSubjectScore(testRes, 'Biology');
+          const mathScore = getSubjectScore(testRes, 'Math');
+
           const maxScoreVal = testObj?.maxScore || testRes.maxScore || (testObj?.pattern === 'NEET' || isMedicalProgram ? 720 : 360);
-          const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
-          const rankVal = testRes.rank ? `#${testRes.rank}` : '—';
+          const scoreVal = testRes.score || 0;
+          const pct = maxScoreVal > 0 ? `${Math.round((scoreVal / maxScoreVal) * 100)}%` : '—';
 
-          row[`${labelPrefix} (${testName}) - Status`] = testRes.isAbsent ? 'Absent' : 'Present';
-          row[`${labelPrefix} (${testName}) - Physics`] = testRes.isAbsent ? '—' : phScore;
-          row[`${labelPrefix} (${testName}) - Chemistry`] = testRes.isAbsent ? '—' : chScore;
-          row[`${labelPrefix} (${testName}) - Botany/Zoology/Math`] = testRes.isAbsent ? '—' : thirdCellText;
-          row[`${labelPrefix} (${testName}) - Cumulative Score`] = testRes.isAbsent ? '—' : `${scoreVal}/${maxScoreVal}`;
-          row[`${labelPrefix} (${testName}) - Accuracy`] = testRes.isAbsent ? '—' : accuracyVal;
-          row[`${labelPrefix} (${testName}) - Rank`] = testRes.isAbsent ? '—' : rankVal;
+          row['Physics Correct Qs'] = phy ? (phy.correct ?? 0) : 0;
+          row['Physics Incorrect Qs'] = phy ? (phy.wrong ?? 0) : 0;
+          row['Physics Unattempted Qs'] = phy ? (phy.blank ?? 0) : 0;
+          row['Physics Score'] = phyScore;
+
+          row['Chemistry Correct Qs'] = chem ? (chem.correct ?? 0) : 0;
+          row['Chemistry Incorrect Qs'] = chem ? (chem.wrong ?? 0) : 0;
+          row['Chemistry Unattempted Qs'] = chem ? (chem.blank ?? 0) : 0;
+          row['Chemistry Score'] = chemScore;
+
+          row['Botany Correct Qs'] = bot ? (bot.correct ?? 0) : 0;
+          row['Botany Incorrect Qs'] = bot ? (bot.wrong ?? 0) : 0;
+          row['Botany Unattempted Qs'] = bot ? (bot.blank ?? 0) : 0;
+          row['Botany Score'] = botScore;
+
+          row['Zoology Correct Qs'] = zoo ? (zoo.correct ?? 0) : 0;
+          row['Zoology Incorrect Qs'] = zoo ? (zoo.wrong ?? 0) : 0;
+          row['Zoology Unattempted Qs'] = zoo ? (zoo.blank ?? 0) : 0;
+          row['Zoology Score'] = zooScore;
+
+          row['Biology Correct Qs'] = bio ? (bio.correct ?? 0) : 0;
+          row['Biology Incorrect Qs'] = bio ? (bio.wrong ?? 0) : 0;
+          row['Biology Unattempted Qs'] = bio ? (bio.blank ?? 0) : 0;
+          row['Biology Score'] = bioScore;
+
+          row['Mathematics Correct Qs'] = math ? (math.correct ?? 0) : 0;
+          row['Mathematics Incorrect Qs'] = math ? (math.wrong ?? 0) : 0;
+          row['Mathematics Unattempted Qs'] = math ? (math.blank ?? 0) : 0;
+          row['Mathematics Score'] = mathScore;
+
+          const totalCorrect = testRes.correct || 0;
+          const totalWrong = testRes.wrong || 0;
+          const totalUnattempted = testRes.blank ?? (maxScoreVal - totalCorrect - totalWrong);
+
+          row['Total Correct Qs'] = totalCorrect;
+          row['Total Incorrect Qs'] = totalWrong;
+          row['Total Unattempted Qs'] = totalUnattempted;
+          row['Total Score'] = scoreVal;
+          row['% Score'] = pct;
+          row['Center Rank'] = testRes.rank || '—';
+          row['Predicted Rank'] = determineRankBucket(scoreVal, maxScoreVal, testObj?.pattern || testRes.testPattern || '');
         }
-      });
 
-      exportData.push(row);
+        exportData.push(row);
+      });
     });
 
     const csv = Papa.unparse(exportData);
@@ -5202,6 +5265,24 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState<string>('');
   const [topicSort, setTopicSort] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const [studentProfile, setStudentProfile] = useState<any>(null);
+
+  useEffect(() => {
+    const fetchStudentProfile = async () => {
+      if (result.regNo) {
+        try {
+          const q = query(collection(db, "students"), where("regNo", "==", result.regNo));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            setStudentProfile(snap.docs[0].data());
+          }
+        } catch (e) {
+          console.error("Failed to fetch student profile for scorecard CSV:", e);
+        }
+      }
+    };
+    fetchStudentProfile();
+  }, [result.regNo]);
 
   useEffect(() => {
     if (autoPrint) {
@@ -5410,22 +5491,99 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
   const currentAccuracy = activeStats !== null ? activeStats.accuracy : (result.accuracy || 0);
 
   const handleExportDetail = () => {
-    const exportData = [
-      { Category: 'Student Name', Value: result.studentName },
-      { Category: 'Reg No', Value: result.regNo },
-      { Category: 'Total Score', Value: currentScore },
-      { Category: 'Correct', Value: currentCorrect },
-      { Category: 'Wrong', Value: currentWrong },
-      { Category: 'Accuracy', Value: `${currentAccuracy}%` },
-      { Category: '', Value: '' },
-      { Category: 'Subject Breakdown', Value: '' }
-    ];
+    const sType = studentProfile?.type || result.type || '—';
+    const sTarget = studentProfile?.rankTarget || result.rankTarget || '—';
+    const sCenter = studentProfile?.centerName || result.centerName || '—';
+    const sBatch = studentProfile?.batchName || result.batchName || '—';
 
-    Object.entries(result.subjectStats || activeStats?.subjectStats || {}).forEach(([subject, stats]: [string, any]) => {
-      exportData.push({ Category: subject, Value: `Score: ${stats.score}, Correct: ${stats.correct}, Incorrect: ${stats.wrong || 0}` });
-    });
+    const testPattern = test?.pattern || result.pattern || '';
+    const isMedical = testPattern === 'NEET' || String(testPattern).toLowerCase().includes('neet');
 
-    const csv = Papa.unparse(exportData);
+    const getSubjectStats = (subId: string) => {
+      const stats = normalizedResult.subjectStats || {};
+      if (stats[subId]) return stats[subId];
+      const key = Object.keys(stats).find(k => k.toLowerCase().trim() === subId.toLowerCase().trim());
+      if (key) return stats[key];
+      if (subId === 'Math') {
+        const altKey = Object.keys(stats).find(k => ['maths', 'mathematics'].includes(k.toLowerCase().trim()));
+        if (altKey) return stats[altKey];
+      }
+      return null;
+    };
+
+    const phy = getSubjectStats('Physics');
+    const chem = getSubjectStats('Chemistry');
+    const bot = getSubjectStats('Botany');
+    const zoo = getSubjectStats('Zoology');
+    const bio = getSubjectStats('Biology');
+    const math = getSubjectStats('Math');
+
+    const phyScore = phy ? (phy.score ?? 0) : '—';
+    const chemScore = chem ? (chem.score ?? 0) : '—';
+    const botScore = bot ? (bot.score ?? 0) : '—';
+    const zooScore = zoo ? (zoo.score ?? 0) : '—';
+    const bioScore = bio ? (bio.score ?? 0) : '—';
+    const mathScore = math ? (math.score ?? 0) : '—';
+
+    const scoreVal = currentScore;
+    const computedMax = test?.maxScore || result.maxScore || (isMedical ? 720 : 360);
+    const percentScore = computedMax > 0 ? `${Math.round((scoreVal / computedMax) * 100)}%` : '—';
+    const predictedRank = result.isAbsent ? '—' : determineRankBucket(scoreVal, computedMax, testPattern);
+
+    const totalCorrect = currentCorrect;
+    const totalWrong = currentWrong;
+    const totalUnattempted = result.isAbsent ? 0 : (result.blank ?? (computedMax - totalCorrect - totalWrong));
+
+    const row = {
+      'Student Name': result.studentName,
+      'Registration No': result.regNo,
+      'Center': sCenter,
+      'Batch': sBatch,
+      'Student Type': sType,
+      'Rank Target': sTarget,
+      'Test Name': test?.name || result.testName || '—',
+      'Test Date': test?.date || result.testDate || '—',
+      
+      'Physics Correct Qs': result.isAbsent ? '—' : (phy ? (phy.correct ?? 0) : 0),
+      'Physics Incorrect Qs': result.isAbsent ? '—' : (phy ? (phy.wrong ?? 0) : 0),
+      'Physics Unattempted Qs': result.isAbsent ? '—' : (phy ? (phy.blank ?? 0) : 0),
+      'Physics Score': result.isAbsent ? '—' : phyScore,
+
+      'Chemistry Correct Qs': result.isAbsent ? '—' : (chem ? (chem.correct ?? 0) : 0),
+      'Chemistry Incorrect Qs': result.isAbsent ? '—' : (chem ? (chem.wrong ?? 0) : 0),
+      'Chemistry Unattempted Qs': result.isAbsent ? '—' : (chem ? (chem.blank ?? 0) : 0),
+      'Chemistry Score': result.isAbsent ? '—' : chemScore,
+
+      'Botany Correct Qs': result.isAbsent ? '—' : (bot ? (bot.correct ?? 0) : 0),
+      'Botany Incorrect Qs': result.isAbsent ? '—' : (bot ? (bot.wrong ?? 0) : 0),
+      'Botany Unattempted Qs': result.isAbsent ? '—' : (bot ? (bot.blank ?? 0) : 0),
+      'Botany Score': result.isAbsent ? '—' : botScore,
+
+      'Zoology Correct Qs': result.isAbsent ? '—' : (zoo ? (zoo.correct ?? 0) : 0),
+      'Zoology Incorrect Qs': result.isAbsent ? '—' : (zoo ? (zoo.wrong ?? 0) : 0),
+      'Zoology Unattempted Qs': result.isAbsent ? '—' : (zoo ? (zoo.blank ?? 0) : 0),
+      'Zoology Score': result.isAbsent ? '—' : zooScore,
+
+      'Biology Correct Qs': result.isAbsent ? '—' : (bio ? (bio.correct ?? 0) : 0),
+      'Biology Incorrect Qs': result.isAbsent ? '—' : (bio ? (bio.wrong ?? 0) : 0),
+      'Biology Unattempted Qs': result.isAbsent ? '—' : (bio ? (bio.blank ?? 0) : 0),
+      'Biology Score': result.isAbsent ? '—' : bioScore,
+
+      'Mathematics Correct Qs': result.isAbsent ? '—' : (math ? (math.correct ?? 0) : 0),
+      'Mathematics Incorrect Qs': result.isAbsent ? '—' : (math ? (math.wrong ?? 0) : 0),
+      'Mathematics Unattempted Qs': result.isAbsent ? '—' : (math ? (math.blank ?? 0) : 0),
+      'Mathematics Score': result.isAbsent ? '—' : mathScore,
+
+      'Total Correct Qs': result.isAbsent ? '—' : totalCorrect,
+      'Total Incorrect Qs': result.isAbsent ? '—' : totalWrong,
+      'Total Unattempted Qs': result.isAbsent ? '—' : totalUnattempted,
+      'Total Score': result.isAbsent ? '—' : scoreVal,
+      '% Score': result.isAbsent ? '—' : percentScore,
+      'Center Rank': result.isAbsent ? '—' : (result.rank || '—'),
+      'Predicted Rank': predictedRank
+    };
+
+    const csv = Papa.unparse([row]);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
