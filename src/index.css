@@ -28,3 +28,64 @@ body {
   @apply bg-[#F8FAFC] text-slate-900 antialiased selection:bg-blue-100;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
+
+@media print {
+  /* Hide interactive screen-only elements */
+  aside,
+  nav,
+  button,
+  select,
+  input,
+  header,
+  .no-print,
+  .toaster,
+  [role="status"] {
+    display: none !important;
+  }
+
+  /* Reset layout constraints for full page paper print */
+  html, body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    height: auto !important;
+  }
+
+  body {
+    background-color: #FFFFFF !important;
+  }
+
+  /* Eliminate sidebar offset and container padding */
+  .flex-1 {
+    padding-left: 0 !important;
+    padding-bottom: 0 !important;
+  }
+
+  .max-w-7xl, 
+  .max-w-\[1600px\] {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Remove screen shadows and heavy border radii during print */
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl,
+  .shadow-2xl {
+    box-shadow: none !important;
+  }
+
+  .rounded-\[2rem\],
+  .rounded-\[2\.5rem\],
+  .rounded-\[3rem\] {
+    border-radius: 1rem !important;
+  }
+
+  /* Force background colors to print beautifully */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+

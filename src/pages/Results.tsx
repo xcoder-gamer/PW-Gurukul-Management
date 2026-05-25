@@ -54,6 +54,71 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
+// Utility to determine Rank Bucket based on percentage score and pattern
+const determineRankBucket = (score: number, maxScore: number, pattern: string): string => {
+  if (!maxScore || maxScore <= 0 || score === undefined || score === null) return '—';
+  const pct = (score / maxScore) * 100;
+  const pat = (pattern || '').toUpperCase();
+
+  // Smart fallback detection if pattern is empty
+  let isNeet = pat === 'NEET';
+  let isJeeMain = pat.includes('JEE_MAIN') || pat === 'JEE MAIN' || pat === 'JEE_MAIN';
+  let isJeeAdv = pat.includes('JEE_ADVANCED') || pat.includes('ADV') || pat === 'JEE ADV' || pat === 'JEE_ADVANCED';
+
+  if (!isNeet && !isJeeMain && !isJeeAdv) {
+    if (maxScore === 720) {
+      isNeet = true;
+    } else {
+      isJeeMain = true; // default fallback
+    }
+  }
+
+  if (isJeeMain) {
+    if (pct >= 95.00) return 'Under 100';
+    if (pct >= 91.67) return 'Under 500';
+    if (pct >= 88.33) return 'Under 1k';
+    if (pct >= 85.67) return 'Under 2k';
+    if (pct >= 83.67) return 'Under 3k';
+    if (pct >= 82.33) return 'Under 4k';
+    if (pct >= 81.33) return 'Under 5k';
+    if (pct >= 80.33) return 'Under 6k';
+    if (pct >= 79.33) return 'Under 7k';
+    if (pct >= 78.33) return 'Under 8k';
+    if (pct >= 77.33) return 'Under 9k';
+    if (pct >= 76.67) return 'Under 10k';
+    return 'More than 10k';
+  } else if (isJeeAdv) {
+    if (pct >= 80.00) return 'Under 100';
+    if (pct >= 70.00) return 'Under 500';
+    if (pct >= 65.00) return 'Under 1k';
+    if (pct >= 58.00) return 'Under 2k';
+    if (pct >= 54.00) return 'Under 3k';
+    if (pct >= 51.50) return 'Under 4k';
+    if (pct >= 49.00) return 'Under 5k';
+    if (pct >= 46.50) return 'Under 6k';
+    if (pct >= 45.60) return 'Under 7k';
+    if (pct >= 44.00) return 'Under 8k';
+    if (pct >= 43.00) return 'Under 9k';
+    if (pct >= 42.00) return 'Under 10k';
+    return 'More than 10k';
+  } else if (isNeet) {
+    if (pct >= 97.92) return 'Under 100';
+    if (pct >= 95.83) return 'Under 500';
+    if (pct >= 93.06) return 'Under 1k';
+    if (pct >= 92.36) return 'Under 2k';
+    if (pct >= 91.67) return 'Under 3k';
+    if (pct >= 90.97) return 'Under 4k';
+    if (pct >= 90.28) return 'Under 5k';
+    if (pct >= 89.72) return 'Under 6k';
+    if (pct >= 89.17) return 'Under 7k';
+    if (pct >= 88.61) return 'Under 8k';
+    if (pct >= 88.06) return 'Under 9k';
+    if (pct >= 87.50) return 'Under 10k';
+    return 'More than 10k';
+  }
+  return '—';
+};
+
 // Utility to calculate score and stats
 const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, qbgMap: any = {}, pattern: string = '') => {
   let score = 0;
@@ -438,7 +503,10 @@ export default function Results() {
     email: '',
     testMode: 'offline' as 'offline' | 'online',
     isAbsent: false,
-    studentAnswers: {} as Record<string, string>
+    studentAnswers: {} as Record<string, string>,
+    type: '',
+    rankTarget: '',
+    targetYear: ''
   });
   const [isSavingManual, setIsSavingManual] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -448,6 +516,8 @@ export default function Results() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedResult, setSelectedResult] = useState<any>(null);
+  const [detailBackView, setDetailBackView] = useState<'table' | 'analytics'>('table');
+  const [autoPrintDetail, setAutoPrintDetail] = useState(false);
   const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -488,21 +558,26 @@ export default function Results() {
 
   const sortedResults = useMemo(() => {
     // Standardize results into map format for easiest UI consumption
-    const normalizedResults = results.map(res => ({
-      ...res,
-      subjectStats: Array.isArray(res.subjectStats) 
-        ? res.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
-        : res.subjectStats,
-      chapterStats: Array.isArray(res.chapterStats)
-        ? res.chapterStats.reduce((acc: any, c: any) => ({ ...acc, [c.name]: c }), {})
-        : res.chapterStats,
-      topicStats: Array.isArray(res.topicStats)
-        ? res.topicStats.reduce((acc: any, t: any) => ({ ...acc, [t.name]: t }), {})
-        : res.topicStats,
-      difficultyStats: Array.isArray(res.difficultyStats)
-        ? res.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
-        : res.difficultyStats
-    }));
+    const normalizedResults = results.map(res => {
+      const associatedTest = tests.find(t => t.id === res.testId);
+      return {
+        ...res,
+        testPattern: associatedTest?.pattern || res.pattern || '',
+        testMaxScore: associatedTest?.maxScore || res.maxScore || (associatedTest?.pattern === 'NEET' ? 720 : 360),
+        subjectStats: Array.isArray(res.subjectStats) 
+          ? res.subjectStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
+          : res.subjectStats,
+        chapterStats: Array.isArray(res.chapterStats)
+          ? res.chapterStats.reduce((acc: any, c: any) => ({ ...acc, [c.name]: c }), {})
+          : res.chapterStats,
+        topicStats: Array.isArray(res.topicStats)
+          ? res.topicStats.reduce((acc: any, t: any) => ({ ...acc, [t.name]: t }), {})
+          : res.topicStats,
+        difficultyStats: Array.isArray(res.difficultyStats)
+          ? res.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
+          : res.difficultyStats
+      };
+    });
 
     let filtered = [...normalizedResults];
 
@@ -1026,6 +1101,9 @@ export default function Results() {
             batchCode: studentInfo.batchCode || batchDetail?.batchCode || res.batchCode,
             programId: programDetail?.id || programId,
             programName: programDetail?.programName || res.programName,
+            type: studentInfo.type || '',
+            rankTarget: studentInfo.rankTarget || '',
+            targetYear: studentInfo.targetYear || '',
           };
         } else {
           // If no student document exists but ids are in result, still map batch/center names dynamically from cached metadata if possible!
@@ -1111,6 +1189,7 @@ export default function Results() {
         'Center': res.centerName || '—',
         'Batch': res.batchName || '—',
         'Total Score': res.score,
+        'Estimated Rank Bucket': determineRankBucket(res.score, res.testMaxScore, res.testPattern),
         'Physics': pScore,
         'Chemistry': cScore,
         'Mathematics': mScore,
@@ -1150,6 +1229,14 @@ export default function Results() {
         }}
         onSelectResult={(res) => {
           setSelectedResult(res);
+          setDetailBackView('analytics');
+          setAutoPrintDetail(false);
+          setView('detail');
+        }}
+        onPrintResult={(res) => {
+          setSelectedResult(res);
+          setDetailBackView('analytics');
+          setAutoPrintDetail(true);
           setView('detail');
         }}
       />
@@ -1157,7 +1244,14 @@ export default function Results() {
   }
 
   if (view === 'detail' && selectedResult) {
-    return <ResultDetail result={selectedResult} onBack={() => setView('table')} onUpdate={() => fetchResults(selectedTestIds)} />;
+    return (
+      <ResultDetail 
+        result={selectedResult} 
+        onBack={() => setView(detailBackView)} 
+        onUpdate={() => fetchResults(selectedTestIds)} 
+        autoPrint={autoPrintDetail}
+      />
+    );
   }
 
   return (
@@ -1247,7 +1341,7 @@ export default function Results() {
               }
               setShowManualEntry(true);
               setEditingResultId(null);
-              setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {} });
+              setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {}, type: '', rankTarget: '', targetYear: '' });
             }} className="bg-blue-600 shadow-lg shadow-blue-100">
               <Plus size={18} className="mr-2" />
               Add Result
@@ -1478,9 +1572,27 @@ export default function Results() {
                       <td className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase">{res.testDate}</td>
                       <td className="px-6 py-5 font-black text-slate-900">{res.testName}</td>
                       <td className="px-6 py-5 text-[11px] font-bold text-blue-600 uppercase">{res.regNo}</td>
-                      <td className="px-6 py-5 font-black text-slate-900">
-                        {res.studentName}
-                        {res.isAbsent && <Badge variant="slate" className="ml-2 text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
+                      <td className="px-6 py-5">
+                        <div className="flex flex-col">
+                          <span className="text-sm font-black text-slate-900">{res.studentName}</span>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
+                            {res.type && (
+                              <span className="text-[9px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono">
+                                {res.type}
+                              </span>
+                            )}
+                            {res.rankTarget && (
+                              <span className="text-[9px] font-black text-amber-750 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-wide font-mono inline-flex items-center gap-0.5">
+                                <Target size={10} className="text-amber-500" />
+                                {res.rankTarget}
+                                {res.targetYear && (
+                                  <span className="text-slate-400 text-[8px] font-normal">({res.targetYear})</span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-6 py-5 text-sm font-bold text-slate-600">{res.centerName || '—'}</td>
                       <td className="px-6 py-5 text-sm font-medium text-slate-500">{res.batchName || '—'}</td>
@@ -1489,8 +1601,15 @@ export default function Results() {
                           {res.testMode || 'offline'}
                         </Badge>
                       </td>
-                      <td className="px-6 py-5 text-center bg-blue-50/10">
-                        <span className="text-xl font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
+                      <td className="px-6 py-5 text-center bg-blue-50/10 whitespace-nowrap">
+                        <div className="flex flex-col items-center justify-center">
+                          <span className="text-xl font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
+                          {!res.isAbsent && (
+                            <span className="text-[8px] font-extrabold text-rose-700 bg-rose-50 rounded border border-rose-100 px-1.5 py-0.5 mt-1 tracking-tight uppercase font-mono">
+                              {determineRankBucket(res.score, res.testMaxScore, res.testPattern)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       {allAvailableSubjects.map(sub => (
                         <td key={sub} className="px-6 py-5 text-center">
@@ -1522,7 +1641,12 @@ export default function Results() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => { setSelectedResult(res); setView('detail'); }}
+                            onClick={() => { 
+                              setSelectedResult(res); 
+                              setDetailBackView('table');
+                              setAutoPrintDetail(false);
+                              setView('detail'); 
+                            }}
                             className="hover:bg-blue-50 hover:text-blue-600 rounded-xl"
                           >
                             <ChevronRight size={18} strokeWidth={3} />
@@ -2037,7 +2161,10 @@ export default function Results() {
                                   ...prev,
                                   name: sData.name || prev.name,
                                   phone: sData.phone || prev.phone,
-                                  email: sData.email || prev.email
+                                  email: sData.email || prev.email,
+                                  type: sData.type || prev.type || '',
+                                  rankTarget: sData.rankTarget || prev.rankTarget || '',
+                                  targetYear: sData.targetYear || prev.targetYear || ''
                                 }));
                               }
                             } catch (err) {
@@ -2085,6 +2212,55 @@ export default function Results() {
                       <option value="offline">Offline</option>
                       <option value="online">Online</option>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Student Type</label>
+                    <Select
+                      value={manualData.type || ''}
+                      onChange={e => setManualData({ ...manualData, type: e.target.value })}
+                      className="font-bold border-slate-100 rounded-2xl shadow-sm"
+                    >
+                      <option value="">Select Student Type</option>
+                      <option value="Dropper">Dropper</option>
+                      <option value="12th Pass">12th Pass</option>
+                      <option value="12th Study">12th Study</option>
+                      <option value="11th Study">11th Study</option>
+                      <option value="Foundation">Foundation</option>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Rank Target</label>
+                    <Select
+                      value={manualData.rankTarget || ''}
+                      onChange={e => setManualData({ ...manualData, rankTarget: e.target.value })}
+                      className="font-bold border-slate-100 rounded-2xl shadow-sm"
+                    >
+                      <option value="">Select Rank Target</option>
+                      <option value="Under 100">Under 100</option>
+                      <option value="Under 500">Under 500</option>
+                      <option value="Under 1k">Under 1k</option>
+                      <option value="Under 2k">Under 2k</option>
+                      <option value="Under 3k">Under 3k</option>
+                      <option value="Under 4k">Under 4k</option>
+                      <option value="Under 5k">Under 5k</option>
+                      <option value="Under 6k">Under 6k</option>
+                      <option value="Under 7k">Under 7k</option>
+                      <option value="Under 8k">Under 8k</option>
+                      <option value="Under 9k">Under 9k</option>
+                      <option value="Under 10k">Under 10k</option>
+                      <option value="More than 10k">More than 10k</option>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Target Year</label>
+                    <Input 
+                      placeholder="Enter Target Year (e.g. 2026)"
+                      value={manualData.targetYear || ''}
+                      onChange={e => setManualData({ ...manualData, targetYear: e.target.value })}
+                    />
                   </div>
                 </div>
 
@@ -2232,6 +2408,9 @@ export default function Results() {
                         programName: programDetail?.programName || '',
                         phone: manualData.phone || studentInfo.phone || '',
                         email: manualData.email || studentInfo.email || '',
+                        type: manualData.type || studentInfo.type || '',
+                        rankTarget: manualData.rankTarget || studentInfo.rankTarget || '',
+                        targetYear: manualData.targetYear || studentInfo.targetYear || '',
                         ...stats,
                         isAbsent: manualData.isAbsent || stats.isAbsent,
                         partial: 0,
@@ -2252,14 +2431,17 @@ export default function Results() {
                         await updateDoc(doc(db, 'students', studentsSnap.docs[0].id), {
                           name: manualData.name || studentInfo.name || '',
                           phone: manualData.phone || studentInfo.phone || '',
-                          email: manualData.email || studentInfo.email || ''
+                          email: manualData.email || studentInfo.email || '',
+                          type: manualData.type || studentInfo.type || '',
+                          rankTarget: manualData.rankTarget || studentInfo.rankTarget || '',
+                          targetYear: manualData.targetYear || studentInfo.targetYear || ''
                         });
                       }
 
                       toast.success(editingResultId ? 'Result updated successfully!' : 'Result saved successfully!');
                       setShowManualEntry(false);
                       setEditingResultId(null);
-                      setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {} });
+                      setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {}, type: '', rankTarget: '', targetYear: '' });
                       fetchResults(selectedTestIds);
                     } catch (err) {
                       console.error(err);
@@ -2407,7 +2589,7 @@ export default function Results() {
   );
 }
 
-function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult }: { 
+function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult, onPrintResult }: { 
   results: any[], 
   tests: any[], 
   onBack: () => void,
@@ -2415,7 +2597,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   initialSearch?: string,
   onTestToggle?: (id: string) => void,
   onSelectAllTests?: (ids: string[]) => void,
-  onSelectResult?: (res: any) => void
+  onSelectResult?: (res: any) => void,
+  onPrintResult?: (res: any) => void
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
@@ -2489,12 +2672,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           centerName: res.centerName || '—',
           batchName: res.batchName || '—',
           batchCode: res.batchCode || '—',
+          type: res.type || '',
+          rankTarget: res.rankTarget || '',
+          targetYear: res.targetYear || '',
           sKey: sKey
         };
       } else {
         if (res.centerName && res.centerName !== '—') allStudentsMap[sKey].centerName = res.centerName;
         if (res.batchName && res.batchName !== '—') allStudentsMap[sKey].batchName = res.batchName;
         if (res.batchCode) allStudentsMap[sKey].batchCode = res.batchCode;
+        if (res.type) allStudentsMap[sKey].type = res.type;
+        if (res.rankTarget) allStudentsMap[sKey].rankTarget = res.rankTarget;
+        if (res.targetYear) allStudentsMap[sKey].targetYear = res.targetYear;
       }
 
       // Apply Test Mode Filter for aggregate analysis
@@ -2521,6 +2710,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           centerName: res.centerName || '—',
           batchName: res.batchName || '—',
           batchCode: res.batchCode || '—',
+          type: res.type || '',
+          rankTarget: res.rankTarget || '',
+          targetYear: res.targetYear || '',
           sKey: sKey,
           testsTaken: 0,
           totalScore: 0,
@@ -2542,6 +2734,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       if (res.centerName && res.centerName !== '—') studentAggregates[sKey].centerName = res.centerName;
       if (res.batchName && res.batchName !== '—') studentAggregates[sKey].batchName = res.batchName;
       if (res.batchCode) studentAggregates[sKey].batchCode = res.batchCode;
+      if (res.type) studentAggregates[sKey].type = res.type;
+      if (res.rankTarget) studentAggregates[sKey].rankTarget = res.rankTarget;
+      if (res.targetYear) studentAggregates[sKey].targetYear = res.targetYear;
 
       // Per Student Mapped Evaluation
       const evaluations = res.mappedEvaluation || [];
@@ -2832,8 +3027,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     // Standardize allCompResults. If subjectStats is empty or missing, evaluate it dynamically.
     const resolvedResults = allCompResults.map(res => {
       let subjStats = res.subjectStats;
+      const test = tests.find(t => t.id === res.testId);
       if (!subjStats || Object.keys(subjStats).length === 0) {
-        const test = tests.find(t => t.id === res.testId);
         if (test) {
           const stats = evaluateResult(res.responsesJson || {}, test.answerKey || {}, qbgMap, test.pattern);
           subjStats = stats.subjectStats;
@@ -2842,6 +3037,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
       return {
         ...res,
+        testName: test?.name || res.testName || 'Unknown Test',
+        testDate: test?.date || res.testDate || '',
+        testPattern: test?.pattern || res.pattern || '',
+        testMaxScore: test?.maxScore || res.maxScore || (test?.pattern === 'NEET' ? 720 : 365),
         subjectStats: Array.isArray(subjStats) 
           ? subjStats.reduce((acc: any, s: any) => ({ ...acc, [s.name]: s }), {}) 
           : subjStats || {},
@@ -3912,7 +4111,23 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     <td className="px-6 py-5">
                       <div className="flex flex-col">
                         <span className="text-sm font-black text-slate-900 group-hover:text-blue-600 transition-colors">{s.studentName}</span>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Reg: {s.regNo}</span>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Reg: {s.regNo}</span>
+                          {s.type && (
+                            <span className="text-[9px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono">
+                              {s.type}
+                            </span>
+                          )}
+                          {s.rankTarget && (
+                            <span className="text-[9px] font-black text-amber-750 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-wide font-mono inline-flex items-center gap-0.5">
+                              <Target size={10} className="text-amber-500" />
+                              {s.rankTarget}
+                              {s.targetYear && (
+                                <span className="text-slate-400 text-[8px] font-normal">({s.targetYear})</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="px-6 py-5 text-center">
@@ -4413,8 +4628,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             </td>
 
                             {/* Chronological Test Columns */}
-                            {displayedTests.map((testMeta) => {
+                            {displayedTests.map((testMeta, tIdx) => {
                               const testRes = studentItem.testResults[testMeta.testId];
+                              const isCurrentTest = tIdx === 0;
                               
                               if (!testRes) {
                                 return (
@@ -4474,8 +4690,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   {/* All Detail */}
                                   <td 
                                     className={cn(
-                                      "p-3 text-center border-r border-slate-100 bg-blue-50/10 min-w-[95px] transition-colors",
-                                      !testRes.isAbsent && "cursor-pointer hover:bg-blue-100/60 group/cumulative"
+                                      "p-3 text-center border-r border-slate-100 bg-blue-50/10 min-w-[95px] transition-colors relative group/cumulative-cell",
+                                      !testRes.isAbsent && "cursor-pointer hover:bg-blue-100/60"
                                     )}
                                     onClick={() => {
                                       if (!testRes.isAbsent && onSelectResult) {
@@ -4487,13 +4703,37 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                     {testRes.isAbsent ? (
                                       <span className="text-slate-300 italic text-[10px] font-sans">Absent</span>
                                     ) : (
-                                      <div className="space-y-0.5">
-                                        <div className="font-extrabold text-slate-900 tracking-tighter text-xs font-mono group-hover/cumulative:text-blue-700 transition-colors">
+                                      <div className="space-y-1">
+                                        <div className="font-extrabold text-slate-900 tracking-tighter text-xs font-mono group-hover/cumulative-cell:text-blue-700 transition-colors">
                                           {scoreVal}
                                           <span className="text-[9px] font-bold text-slate-400">/{maxScoreVal}</span>
                                         </div>
                                         <div className="text-[9.5px] font-black text-emerald-600 leading-none font-mono">
                                           {accuracyVal} Acc
+                                        </div>
+                                        <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
+                                          {(() => {
+                                            const bucket = determineRankBucket(Number(scoreVal), Number(maxScoreVal), testObj?.pattern || testRes.testPattern);
+                                            return bucket && bucket !== '—' && (
+                                              <div className="text-[7.5px] font-extrabold text-rose-700 bg-rose-50 border border-rose-100 rounded px-1 py-0.5 uppercase tracking-wide font-mono inline-block">
+                                                {bucket}
+                                              </div>
+                                            );
+                                          })()}
+                                          {isCurrentTest && onPrintResult && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                onPrintResult(testRes);
+                                              }}
+                                              title="Print PDF Scorecard"
+                                              className="mt-1.5 py-1 px-2.5 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-lg transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans"
+                                            >
+                                              <FileText size={11} strokeWidth={2.5} className="text-red-500" />
+                                              <span className="text-[9px] font-black uppercase text-red-600 tracking-tight">PDF</span>
+                                            </button>
+                                          )}
                                         </div>
                                       </div>
                                     )}
@@ -4537,7 +4777,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   );
 }
 
-function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () => void, onUpdate?: () => void }) {
+function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, onBack: () => void, onUpdate?: () => void, autoPrint?: boolean }) {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const { qbgMap: qbgTopics } = useMetadata();
@@ -4545,6 +4785,15 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState<string>('');
   const [topicSort, setTopicSort] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+
+  useEffect(() => {
+    if (autoPrint) {
+      const timer = setTimeout(() => {
+        window.print();
+      }, 750);
+      return () => clearTimeout(timer);
+    }
+  }, [autoPrint]);
   const [omrFilter, setOmrFilter] = useState<{ status: string, difficulty: string, subject: string }>({
     status: 'all',
     difficulty: 'all',
@@ -4732,6 +4981,13 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
   }, [evaluationToUse, omrFilter]);
 
   const currentScore = activeStats !== null ? activeStats.score : (result.score || 0);
+
+  const estRankBucket = useMemo(() => {
+    if (result.isAbsent) return null;
+    const computedMax = test?.maxScore || result.maxScore || (test?.pattern === 'NEET' ? 720 : 360);
+    return determineRankBucket(currentScore, computedMax, test?.pattern || result.pattern || '');
+  }, [test, result.isAbsent, result.maxScore, result.pattern, currentScore]);
+
   const currentCorrect = activeStats !== null ? activeStats.correct : (result.correct || 0);
   const currentWrong = activeStats !== null ? activeStats.wrong : (result.wrong || 0);
   const currentAccuracy = activeStats !== null ? activeStats.accuracy : (result.accuracy || 0);
@@ -4765,9 +5021,21 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative">
+    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative print:p-0 print:m-0 print:space-y-6">
+      {/* Printable Scorecard Brand Header */}
+      <div className="hidden print:flex items-center justify-between border-b pb-4 mb-2 border-slate-200">
+        <div className="space-y-1 text-left">
+          <h1 className="text-xl font-black text-slate-900 tracking-tight">PW GURUKUL ACADEMY</h1>
+          <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Official Test Scorecard & Evaluation Report</p>
+        </div>
+        <div className="text-right space-y-0.5">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Date Printed</p>
+          <p className="text-xs font-bold text-slate-800">{new Date().toLocaleDateString()}</p>
+        </div>
+      </div>
+
       {isSyncing && <Loader fullScreen label="Synchronizing Scores..." />}
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-6 print:hidden">
         <div className="flex items-center gap-6">
           <button onClick={onBack} className="p-3 bg-white rounded-2xl border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors">
             <ChevronLeft size={24} strokeWidth={3} className="text-slate-900" />
@@ -4775,9 +5043,29 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
           <div className="space-y-1">
             <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] pl-0.5">Final Result & Analytics</p>
             <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">{result.studentName}</h2>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
                <Badge variant="blue">{result.regNo}</Badge>
                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Rank #{result.rank} • Test ID: {result.testId.slice(-6)}</span>
+               {estRankBucket && estRankBucket !== '—' && (
+                 <span className="text-[9px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 uppercase tracking-wide font-mono inline-flex items-center gap-1">
+                   <Award size={11} className="text-rose-500" />
+                   Est. Rank: {estRankBucket}
+                 </span>
+               )}
+               {result.type && (
+                 <span className="text-[9px] font-black text-violet-700 bg-violet-50 px-2 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono">
+                   {result.type}
+                 </span>
+               )}
+               {result.rankTarget && (
+                 <span className="text-[9px] font-black text-amber-750 bg-amber-50 px-2 py-0.5 rounded border border-amber-100 uppercase tracking-wide font-mono inline-flex items-center gap-1">
+                   <Target size={11} className="text-amber-500" />
+                   {result.rankTarget}
+                   {result.targetYear && (
+                     <span className="text-slate-400 font-normal">({result.targetYear})</span>
+                   )}
+                 </span>
+               )}
             </div>
           </div>
         </div>
@@ -4800,7 +5088,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
       </header>
 
       {/* Toolbar Section moved from header for cleaner look */}
-      <div className="flex flex-wrap items-center justify-end gap-3 bg-white/50 backdrop-blur-sm p-2 rounded-2xl border border-slate-100/50">
+      <div className="flex flex-wrap items-center justify-end gap-3 bg-white/50 backdrop-blur-sm p-2 rounded-2xl border border-slate-100/50 print:hidden">
           <Button variant="outline" size="sm" onClick={handleExportDetail} className="border-slate-200 h-9">
             <Download size={14} className="mr-2 text-emerald-600" />
             <span className="text-xs uppercase tracking-wider font-bold">Export CSV</span>
@@ -4986,7 +5274,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 print:block print:space-y-6">
         <div className="lg:col-span-1 space-y-6">
           <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-10 flex flex-col items-center justify-center space-y-4 shadow-xl shadow-blue-100 rounded-[3rem] relative overflow-hidden">
              <div className="relative z-10 w-20 h-20 bg-white/20 rounded-[2.5rem] flex items-center justify-center backdrop-blur-md">
@@ -4996,6 +5284,11 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
                <p className="text-7xl font-black tracking-tighter leading-none mb-1">{result.isAbsent ? '—' : currentScore}</p>
                <p className="text-sm uppercase font-black text-blue-100 tracking-[0.3em] opacity-80">Aggregate Score</p>
                <p className="text-xs font-bold text-white/50 mt-4 tracking-widest uppercase">{result.isAbsent ? 'ABSENT' : `Rank #${result.rank}`}</p>
+               {estRankBucket && estRankBucket !== '—' && (
+                 <p className="text-[10px] font-black bg-white/15 border border-white/20 rounded-full px-3 py-1 text-white mt-3 uppercase tracking-wider font-mono inline-block">
+                   Est. Rank: {estRankBucket}
+                 </p>
+               )}
              </div>
              <div className="absolute right-[-20%] bottom-[-20%] opacity-10">
                 <Target size={240} />
@@ -5033,7 +5326,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
         </div>
 
         <div className="lg:col-span-2 space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
             <h3 className="font-black text-2xl text-slate-900 tracking-tight">Student OMR Response Sheet</h3>
             <div className="flex flex-wrap items-center gap-2">
               <Select 
@@ -5069,7 +5362,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
             </div>
           </div>
           
-          <Card className="p-8 bg-white border-slate-100 rounded-[3rem] shadow-sm space-y-10">
+          <Card className="p-8 bg-white border-slate-100 rounded-[3rem] shadow-sm space-y-10 print:hidden">
              {(() => {
                const grouped = filteredEvaluation.reduce((acc: any, ev: any) => {
                  const p = ev.paper || 'Questions';
@@ -5181,7 +5474,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
              </div>
           </Card>
 
-          <section className="space-y-6">
+          <section className="space-y-6 print:break-inside-avoid">
             <h3 className="font-black text-xl text-slate-900 tracking-tight">Difficulty Matrix</h3>
             <Card className="overflow-hidden border-slate-100 shadow-sm bg-white rounded-3xl">
               <div className="overflow-x-auto">
@@ -5248,7 +5541,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
             </Card>
           </section>
 
-          <section className="space-y-6">
+          <section className="space-y-6 print:break-inside-avoid">
             <div className="flex items-center justify-between">
               <h3 className="font-black text-xl text-slate-900 tracking-tight">Subject Breakdown</h3>
               <Badge variant="slate" className="bg-slate-50 text-slate-500 border-slate-100 uppercase tracking-widest text-[9px]">Comparative Analysis</Badge>
@@ -5325,7 +5618,7 @@ function ResultDetail({ result, onBack, onUpdate }: { result: any, onBack: () =>
             </Card>
           </section>
 
-          <section className="space-y-6">
+          <section className="space-y-6 print:break-inside-avoid">
             <h3 className="font-black text-xl text-slate-900 tracking-tight">Topic-Level Proficiency</h3>
             <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
               <div className="overflow-x-auto no-scrollbar">
