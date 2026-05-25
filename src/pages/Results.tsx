@@ -53,6 +53,7 @@ import Papa from 'papaparse';
 
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { addLog, LogAction, LogCategory } from '../lib/logs';
 
 // Utility to determine Rank Bucket based on percentage score and pattern
 const determineRankBucket = (score: number, maxScore: number, pattern: string): string => {
@@ -466,7 +467,7 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
 };
 
 export default function Results() {
-  const { role } = useAuth();
+  const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
 
   const findBatchSafely = (idOrCode: string, list: any[]) => {
@@ -491,8 +492,8 @@ export default function Results() {
            list.find(p => String(p.programName || '').trim().toLowerCase() === clean);
   };
 
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-  const canEdit = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin';
+  const canEdit = role === 'admin';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
   const [isReevaluating, setIsReevaluating] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -539,6 +540,20 @@ export default function Results() {
     batchId: ''
   });
 
+  useEffect(() => {
+    if (role === 'center' || role === 'center_level') {
+      if (centerId && filters.centerId !== centerId) {
+        setFilters(f => ({ ...f, centerId }));
+      }
+    } else if (role === 'teacher') {
+      if (batchIds && batchIds.length > 0) {
+        if (!filters.batchId || !batchIds.includes(filters.batchId)) {
+          setFilters(f => ({ ...f, batchId: batchIds[0] }));
+        }
+      }
+    }
+  }, [role, centerId, batchIds]);
+
   const [wizardProgramId, setWizardProgramId] = useState('');
   const [wizardBatchId, setWizardBatchId] = useState('');
   const [testSearchQuery, setTestSearchQuery] = useState('');
@@ -578,6 +593,14 @@ export default function Results() {
           ? res.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
           : res.difficultyStats
       };
+    }).filter(r => {
+      if ((role === 'center' || role === 'center_level') && r.centerId !== centerId) {
+        return false;
+      }
+      if (role === 'teacher' && (!batchIds || !batchIds.includes(r.batchId))) {
+        return false;
+      }
+      return true;
     });
 
     let filtered = [...normalizedResults];
@@ -957,6 +980,72 @@ export default function Results() {
       toast.error('Sync failed', { id: toastId });
     } finally {
       setIsSyncingGlobal(false);
+    }
+  };
+
+  const handleDeleteOrphanedResults = async () => {
+    if (!window.confirm('Are you sure you want to search the database for orphaned results (results with no matching test master) and delete them?')) {
+      return;
+    }
+
+    setLoading(true);
+    const toastId = toast.loading('Searching for orphaned results...');
+    try {
+      // 1. Fetch all test IDs
+      const testsSnap = await getDocs(collection(db, 'tests'));
+      const testIds = new Set(testsSnap.docs.map(doc => doc.id));
+
+      // 2. Fetch all results
+      const resultsSnap = await getDocs(collection(db, 'result_updated'));
+      const orphanedDocs = resultsSnap.docs.filter(docSnap => {
+        const data = docSnap.data();
+        return !data.testId || !testIds.has(data.testId);
+      });
+
+      if (orphanedDocs.length === 0) {
+        toast.success('No orphaned results found in the database!', { id: toastId });
+        setLoading(false);
+        return;
+      }
+
+      if (!window.confirm(`Found ${orphanedDocs.length} orphaned result(s) with no matching test master in the database. Do you want to permanently delete them? This action CANNOT be undone.`)) {
+        toast.error('Clean up canceled by user', { id: toastId });
+        setLoading(false);
+        return;
+      }
+
+      // 3. Delete them in batches/parallels
+      const CHUNK_SIZE = 15;
+      const docIdsToDelete = orphanedDocs.map(d => d.id);
+      const chunks = [];
+      for (let i = 0; i < docIdsToDelete.length; i += CHUNK_SIZE) {
+        chunks.push(docIdsToDelete.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (const chunk of chunks) {
+        await Promise.all(
+          chunk.map(id => deleteDoc(doc(db, 'result_updated', id)))
+        );
+      }
+
+      // Also log this
+      await addLog({
+        userId: user?.uid || 'system',
+        userEmail: user?.email || 'unknown',
+        action: LogAction.DELETE,
+        category: LogCategory.TEST,
+        resourceId: 'bulk-orphans',
+        resourceName: 'Orphaned Results Cleanup',
+        details: `Deleted ${orphanedDocs.length} orphaned results from the database`,
+      });
+
+      toast.success(`Successfully deleted ${orphanedDocs.length} orphaned results!`, { id: toastId });
+      fetchResults(selectedTestIds);
+    } catch (err: any) {
+      console.error('Failed to cleanup orphaned results:', err);
+      toast.error(err.message || 'Cleanup failed', { id: toastId });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1378,6 +1467,17 @@ export default function Results() {
               Bulk OMR
             </Button>
           )}
+          {canEdit && (
+            <Button 
+              variant="outline" 
+              size="md" 
+              onClick={handleDeleteOrphanedResults}
+              className="border-rose-100 text-rose-600 hover:bg-rose-50"
+            >
+              <Trash2 size={18} className="mr-2 text-rose-500" />
+              Clean Orphans
+            </Button>
+          )}
           <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl px-6">
             <Filter size={18} className="mr-2" />
             {selectedTestIds.length === 1 
@@ -1571,7 +1671,12 @@ export default function Results() {
                         />
                       </td>
                       <td className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase">{res.testDate}</td>
-                      <td className="px-6 py-5 font-black text-slate-900">{res.testName}</td>
+                      <td className="px-6 py-5">
+                        <div className="flex flex-col">
+                          <span className="font-black text-slate-900 leading-tight">{res.testName}</span>
+                          <span className="text-[9px] font-mono font-bold text-slate-400/80 mt-0.5" title="Test ID">ID: {res.testId}</span>
+                        </div>
+                      </td>
                       <td className="px-6 py-5 text-[11px] font-bold text-blue-600 uppercase">{res.regNo}</td>
                       <td className="px-6 py-5">
                         <div className="flex flex-col">
@@ -1804,10 +1909,11 @@ export default function Results() {
                                 <h4 className="font-black text-slate-900 group-hover:text-blue-700 transition-colors leading-tight line-clamp-2">
                                    {t.name}
                                 </h4>
-                                <div className="flex items-center gap-2 mt-2">
+                                <div className="flex flex-wrap items-center gap-2 mt-2">
                                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest bg-slate-100/60 px-2 py-1 rounded-lg">
                                       {t.date}
                                    </span>
+                                   <span className="text-[10px] font-mono px-2 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold" title="Test ID">ID: {t.id}</span>
                                    <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded-lg">
                                       {t.pattern?.replace('_', ' ')}
                                    </span>
@@ -1975,33 +2081,57 @@ export default function Results() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Center</label>
-                  <Select 
-                    value={filters.centerId} 
-                    onChange={e => setFilters({...filters, centerId: e.target.value, batchId: ''})}
-                    className="rounded-2xl border-slate-100 font-bold"
-                  >
-                    <option value="">All Centers</option>
-                    {masters.centers.filter((c: any) => c.isActive).map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.centerName}</option>
-                    ))}
-                  </Select>
+                  {(role === 'center' || role === 'center_level') ? (
+                    <Select 
+                      value={centerId || ''} 
+                      disabled
+                      className="rounded-2xl border-slate-100 font-bold"
+                    >
+                      {masters.centers.filter((c: any) => c.id === centerId).map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.centerName}</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Select 
+                      value={filters.centerId} 
+                      onChange={e => setFilters({...filters, centerId: e.target.value, batchId: ''})}
+                      className="rounded-2xl border-slate-100 font-bold"
+                    >
+                      <option value="">All Centers</option>
+                      {masters.centers.filter((c: any) => c.isActive).map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.centerName}</option>
+                      ))}
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Batch</label>
-                  <Select 
-                    value={filters.batchId} 
-                    onChange={e => setFilters({...filters, batchId: e.target.value})}
-                    className="rounded-2xl border-slate-100 font-bold"
-                  >
-                    <option value="">All Batches</option>
-                    {masters.batches.filter((b: any) => 
-                      b.isActive && 
-                      (!filters.programId || b.programId === filters.programId) &&
-                      (!filters.centerId || b.centerId === filters.centerId)
-                    ).map((b: any) => (
-                      <option key={b.id} value={b.id}>{b.batchName}</option>
-                    ))}
-                  </Select>
+                  {role === 'teacher' ? (
+                    <Select 
+                      value={filters.batchId} 
+                      onChange={e => setFilters({...filters, batchId: e.target.value})}
+                      className="rounded-2xl border-slate-100 font-bold"
+                    >
+                      {masters.batches.filter((b: any) => b.isActive && batchIds?.includes(b.id)).map((b: any) => (
+                        <option key={b.id} value={b.id}>{b.batchName}</option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Select 
+                      value={filters.batchId} 
+                      onChange={e => setFilters({...filters, batchId: e.target.value})}
+                      className="rounded-2xl border-slate-100 font-bold"
+                    >
+                      <option value="">All Batches</option>
+                      {masters.batches.filter((b: any) => 
+                        b.isActive && 
+                        (!filters.programId || b.programId === filters.programId) &&
+                        (!filters.centerId || b.centerId === filters.centerId)
+                      ).map((b: any) => (
+                        <option key={b.id} value={b.id}>{b.batchName}</option>
+                      ))}
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Test Mode</label>

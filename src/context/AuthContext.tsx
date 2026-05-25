@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 interface AuthContextType {
   user: User | null;
   role: string | null;
+  centerId: string | null;
+  batchIds: string[] | null;
   loading: boolean;
   signIn: () => Promise<void>;
   logout: () => Promise<void>;
@@ -18,6 +20,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [centerId, setCenterId] = useState<string | null>(null);
+  const [batchIds, setBatchIds] = useState<string[] | null>(null);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -36,12 +40,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           let resolvedRole = 'unauthorized';
+          let docData: any = null;
           if (roleDoc.exists()) {
-            const data = roleDoc.data();
-            if (data.isActive === false) {
+            docData = roleDoc.data();
+            if (docData.isActive === false) {
               resolvedRole = 'unauthorized';
             } else {
-              resolvedRole = String(data.role || 'user').toLowerCase();
+              resolvedRole = String(docData.role || 'user').toLowerCase();
             }
           } else {
             // 3. Try query (Fallback for random IDs)
@@ -49,23 +54,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const querySnapshot = await getDocs(q);
             
             if (!querySnapshot.empty) {
-              const data = querySnapshot.docs[0].data();
-              if (data.isActive === false) {
+              docData = querySnapshot.docs[0].data();
+              if (docData.isActive === false) {
                 resolvedRole = 'unauthorized';
               } else {
-                resolvedRole = String(data.role || 'user').toLowerCase();
+                resolvedRole = String(docData.role || 'user').toLowerCase();
               }
             } else {
               // 4. Fallback to bootstrap for dev emails
               const adminEmails = ["devansh.sharma@pw.live", "deepayan.nayak@pw.live", "gurukul.ops@pw.live"];
               if (adminEmails.includes(emailId)) {
                 try {
-                  await setDoc(doc(db, 'user_roles', emailId), {
+                  const payload = {
                     role: 'admin',
                     email: user.email.toLowerCase(),
                     isActive: true,
                     createdAt: new Date()
-                  });
+                  };
+                  await setDoc(doc(db, 'user_roles', emailId), payload);
+                  docData = payload;
                 } catch (writeErr) {
                   console.warn("Bootstrap write skipped or failed:", writeErr);
                 }
@@ -76,8 +83,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
+          // Normalize and map role representations: 
+          // central_team / operator / central -> central
+          // center_level / center -> center
+          if (resolvedRole === 'central_team' || resolvedRole === 'operator') {
+            resolvedRole = 'central';
+          }
+          if (resolvedRole === 'center_level') {
+            resolvedRole = 'center';
+          }
+
+          // Resolve Center Assignment: centerId
+          let assignedCenterId: string | null = null;
+          if (docData && docData.centerId) {
+            assignedCenterId = String(docData.centerId);
+          }
+          setCenterId(assignedCenterId);
+
+          // Resolve Batch Assignment: batchIds
+          let activeBatchIds: string[] = [];
+          if (docData && docData.batchIds) {
+            if (Array.isArray(docData.batchIds)) {
+              activeBatchIds = docData.batchIds.map(String);
+            } else if (typeof docData.batchIds === 'string') {
+              activeBatchIds = docData.batchIds.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
+          }
+          if (docData && docData.batchId && !activeBatchIds.includes(String(docData.batchId))) {
+            activeBatchIds.push(String(docData.batchId));
+          }
+
+          // Query mappings/teachers dynamically for 'teacher'
+          if (resolvedRole === 'teacher') {
+            try {
+              const teachQ = query(collection(db, 'teachers'), where('email', '==', emailId));
+              const teachSnap = await getDocs(teachQ);
+              if (!teachSnap.empty) {
+                const teacherId = teachSnap.docs[0].id;
+                const mapQ = query(collection(db, 'mappings'), where('teacherId', '==', teacherId));
+                const mapSnap = await getDocs(mapQ);
+                mapSnap.docs.forEach(docSnap => {
+                  const d = docSnap.data();
+                  if (d.batchId && !activeBatchIds.includes(String(d.batchId))) {
+                    activeBatchIds.push(String(d.batchId));
+                  }
+                });
+              }
+            } catch (err) {
+              console.error("Failed resolving teacher mappings dynamically:", err);
+            }
+          }
+
+          setBatchIds(activeBatchIds.length > 0 ? activeBatchIds : null);
           setRole(resolvedRole);
           localStorage.setItem(`cached_role_${emailId}`, resolvedRole);
+          if (assignedCenterId) localStorage.setItem(`cached_center_${emailId}`, assignedCenterId);
+          if (activeBatchIds.length > 0) localStorage.setItem(`cached_batches_${emailId}`, JSON.stringify(activeBatchIds));
           setIsQuotaExceeded(false);
         } catch (error: any) {
           const errStr = error instanceof Error ? error.message : String(error);
@@ -96,6 +157,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const cached = localStorage.getItem(`cached_role_${emailId}`);
           if (cached) {
             setRole(cached);
+            const cachedCenter = localStorage.getItem(`cached_center_${emailId}`);
+            if (cachedCenter) setCenterId(cachedCenter);
+            const cachedBatches = localStorage.getItem(`cached_batches_${emailId}`);
+            if (cachedBatches) setBatchIds(JSON.parse(cachedBatches));
             toast.warning("🔔 Firestore Quota Exceeded. Entered offline mode with cached role!", {
               description: "Reads and writes might be disabled until your daily Firebase free quota resets, or billing is upgraded.",
               duration: 8000,
@@ -121,6 +186,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         setRole(null);
+        setCenterId(null);
+        setBatchIds(null);
       }
       setLoading(false);
     });
@@ -140,7 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signIn, logout, isQuotaExceeded }}>
+    <AuthContext.Provider value={{ user, role, centerId, batchIds, loading, signIn, logout, isQuotaExceeded }}>
       {children}
     </AuthContext.Provider>
   );

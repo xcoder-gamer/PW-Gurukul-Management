@@ -14,7 +14,7 @@ import { useMetadata } from '../context/MetadataContext';
 
 export default function Tests() {
   const { user, role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin';
   const navigate = useNavigate();
   const [view, setView] = useState<'list' | 'create' | 'detail'>('list');
   const [selectedTest, setSelectedTest] = useState<any>(null);
@@ -1214,6 +1214,7 @@ export default function Tests() {
               <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">{selectedTest.name}</h2>
               <div className="flex items-center gap-3">
                  <Badge variant="blue">{selectedTest.date}</Badge>
+                 <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-500 px-2.5 py-1 rounded-xl uppercase tracking-wider">ID: {selectedTest.id}</span>
                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Version {selectedTest.answerKeyVersion || 1}</span>
               </div>
             </div>
@@ -1599,6 +1600,7 @@ export default function Tests() {
                       </div>
                     </div>
                     <div className="space-y-1">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold block w-fit">ID: {test.id}</span>
                       <h4 className="font-black text-slate-900 tracking-tight text-lg line-clamp-2">{test.name}</h4>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{test.date}</p>
                     </div>

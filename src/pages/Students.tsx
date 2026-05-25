@@ -55,9 +55,9 @@ export const invalidateStudentCache = () => {
 };
 
 export default function Students() {
-  const { user, role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
-  const isViewOnly = role === 'center_level' || role === 'teacher';
+  const { user, role, centerId, batchIds } = useAuth();
+  const isAdmin = role === 'admin';
+  const isViewOnly = role === 'center' || role === 'center_level' || role === 'teacher' || role === 'central' || role === 'central_team';
   const canEdit = isAdmin;
   
   const [students, setStudents] = useState<any[]>([]);
@@ -92,6 +92,20 @@ export default function Students() {
   
   const [search, setSearch] = useState('');
   const { programs, centers, batches } = useMetadata();
+
+  useEffect(() => {
+    if (role === 'center' || role === 'center_level' || role === 'center') {
+      if (centerId && filters.center !== centerId) {
+        setFilters(f => ({ ...f, center: centerId }));
+      }
+    } else if (role === 'teacher') {
+      if (batchIds && batchIds.length > 0) {
+        if (!filters.batch || !batchIds.includes(filters.batch)) {
+          setFilters(f => ({ ...f, batch: batchIds[0] }));
+        }
+      }
+    }
+  }, [role, centerId, batchIds]);
   
   const [filters, setFilters] = useState({
     program: '',
@@ -155,14 +169,29 @@ export default function Students() {
 
     try {
       let q;
-      if (filters.batch) {
-        q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
-      } else if (filters.center) {
-        q = query(collection(db, 'students'), where('centerId', '==', filters.center), limit(1500));
-      } else if (filters.program) {
-        q = query(collection(db, 'students'), where('programId', '==', filters.program), limit(1500));
+      if (role === 'center' || role === 'center_level' || role === 'center') {
+        if (filters.batch) {
+          q = query(collection(db, 'students'), where('centerId', '==', centerId), where('batchId', '==', filters.batch));
+        } else {
+          q = query(collection(db, 'students'), where('centerId', '==', centerId), limit(1500));
+        }
+      } else if (role === 'teacher') {
+        const activeBatch = filters.batch || (batchIds && batchIds.length > 0 ? batchIds[0] : null);
+        if (activeBatch) {
+          q = query(collection(db, 'students'), where('batchId', '==', activeBatch));
+        } else {
+          q = query(collection(db, 'students'), limit(0));
+        }
       } else {
-        q = query(collection(db, 'students'), limit(2000));
+        if (filters.batch) {
+          q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
+        } else if (filters.center) {
+          q = query(collection(db, 'students'), where('centerId', '==', filters.center), limit(1500));
+        } else if (filters.program) {
+          q = query(collection(db, 'students'), where('programId', '==', filters.program), limit(1500));
+        } else {
+          q = query(collection(db, 'students'), limit(2000));
+        }
       }
       
       const snap = await getDocs(q);
@@ -387,6 +416,14 @@ export default function Students() {
   // Memoize filtered students for stability
   const filteredStudents = React.useMemo(() => {
     return students.filter(s => {
+      // Security role filters:
+      if ((role === 'center' || role === 'center_level' || role === 'center') && s.centerId !== centerId) {
+        return false;
+      }
+      if (role === 'teacher' && (!batchIds || !batchIds.includes(s.batchId))) {
+        return false;
+      }
+
       const name = s.name || '';
       const regNo = s.regNo || '';
       const status = s.status || 'active';
@@ -406,7 +443,7 @@ export default function Students() {
              matchesGender && matchesType && matchesTargetYear && matchesRankTarget && 
              matchesStatus;
     });
-  }, [students, search, filters]);
+  }, [students, search, filters, role, centerId, batchIds]);
 
   // Memoize sorted students
   const sortedStudents = React.useMemo(() => {
@@ -1313,14 +1350,22 @@ export default function Students() {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Batch Code</label>
-              <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
-                <option value="">All Batch Codes</option>
-                {batches.filter(b => b.isActive).map(b => (
-                  (!filters.program || b.programId === filters.program) && 
-                  (!filters.center || b.centerId === filters.center) &&
-                  <option key={b.id} value={b.id}>{b.batchName}</option>
-                ))}
-              </Select>
+              {role === 'teacher' ? (
+                <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
+                  {batches.filter(b => b.isActive && batchIds?.includes(b.id)).map(b => (
+                    <option key={b.id} value={b.id}>{b.batchName}</option>
+                  ))}
+                </Select>
+              ) : (
+                <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
+                  <option value="">All Batch Codes</option>
+                  {batches.filter(b => b.isActive).map(b => (
+                    (!filters.program || b.programId === filters.program) && 
+                    (!filters.center || b.centerId === filters.center) &&
+                    <option key={b.id} value={b.id}>{b.batchName}</option>
+                  ))}
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Program</label>
@@ -1331,10 +1376,16 @@ export default function Students() {
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Center</label>
-              <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value, batch: ''})}>
-                <option value="">All Centers</option>
-                {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
-              </Select>
+              {(role === 'center' || role === 'center_level') ? (
+                <Select value={centerId || ''} disabled>
+                  {centers.filter(c => c.id === centerId).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                </Select>
+              ) : (
+                <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value, batch: ''})}>
+                  <option value="">All Centers</option>
+                  {centers.filter(c => c.isActive).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                </Select>
+              )}
             </div>
           </div>
           <Button variant="primary" size="lg" className="w-full shadow-xl shadow-blue-100" onClick={() => setIsFilterOpen(false)}>Apply Filters</Button>

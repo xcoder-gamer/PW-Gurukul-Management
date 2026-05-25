@@ -144,8 +144,9 @@ export default function Masters() {
       collection: 'user_roles',
       fields: [
         { name: 'email', label: 'User Email', type: 'email' },
-        { name: 'role', label: 'Role', type: 'select', options: ['admin', 'central_team', 'center_level', 'teacher', 'operator'] },
+        { name: 'role', label: 'Role', type: 'select', options: ['admin', 'central', 'center', 'teacher'] },
         { name: 'centerId', label: 'Assign Center (for Center Level)', type: 'db-select', collection: 'centers', displayField: 'centerName' },
+        { name: 'batchIds', label: 'Assign Batches (comma separated for Teacher)', type: 'text', placeholder: 'e.g. BATCH1, BATCH2' },
         { name: 'isActive', label: 'Active', type: 'checkbox' }
       ]
     }
@@ -186,9 +187,43 @@ export default function Masters() {
   };
 
   const downloadTemplate = () => {
-    const headers = config.fields.map(f => f.name);
-    const data = [Object.fromEntries(headers.map(h => [h, '']))];
-    const ws = XLSX.utils.json_to_sheet(data);
+    let sampleData: any[] = [];
+    if (type === 'user_roles') {
+      sampleData = [
+        {
+          email: 'sample.admin@pw.live',
+          role: 'admin',
+          centerId: 'All (Leave Blank)',
+          batchIds: 'All (Leave Blank)',
+          isActive: true
+        },
+        {
+          email: 'kota.center@pw.live',
+          role: 'center',
+          centerId: 'Kota', // Center Name (importer resolves to ID)
+          batchIds: 'All (Leave Blank)',
+          isActive: true
+        },
+        {
+          email: 'noida.center@pw.live',
+          role: 'center',
+          centerId: 'Noida Sect. 15', // Center Name (importer resolves to ID)
+          batchIds: 'All (Leave Blank)',
+          isActive: true
+        },
+        {
+          email: 'physics.teacher@pw.live',
+          role: 'teacher',
+          centerId: 'Kota',
+          batchIds: 'Alpha-1, Beta-2', // Comma-separated batch names/codes (importer resolves to IDs)
+          isActive: true
+        }
+      ];
+    } else {
+      const headers = config.fields.map(f => f.name);
+      sampleData = [Object.fromEntries(headers.map(h => [h, '']))];
+    }
+    const ws = XLSX.utils.json_to_sheet(sampleData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
     XLSX.writeFile(wb, `${type}_template.xlsx`);
@@ -239,13 +274,94 @@ export default function Masters() {
         
         const colRef = collection(db, config.collection);
         let count = 0;
+
+        // Pre-fetch centers and batches for intelligent text name -> ID resolutions!
+        let fetchedCenters: any[] = [];
+        let fetchedBatches: any[] = [];
+        try {
+          const centersSnap = await getDocs(collection(db, 'centers'));
+          fetchedCenters = centersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+          const batchesSnap = await getDocs(collection(db, 'batches'));
+          fetchedBatches = batchesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (resolveErr) {
+          console.warn("Failed fetching metadata for import resolution:", resolveErr);
+        }
         
         for (const row of rows) {
-          await addDoc(colRef, {
-            ...row,
-            isActive: row.isActive ?? true,
-            createdAt: Timestamp.now()
-          });
+          const payload = { ...row };
+
+          // 1. Resolve human-written center name directly to real centerId
+          const centerField = row.centerId || row.centerName || row.center || row.Center;
+          if (centerField && centerField !== 'All (Leave Blank)') {
+            const cleanC = String(centerField).trim().toLowerCase();
+            const foundC = fetchedCenters.find(c => 
+              c.id.toLowerCase() === cleanC || 
+              String(c.centerName || '').trim().toLowerCase() === cleanC
+            );
+            if (foundC) {
+              payload.centerId = foundC.id;
+            }
+          }
+
+          // 2. Resolve human-written batch code list directly to batchIds list!
+          const batchField = row.batchIds || row.batchCode || row.batchName || row.assignedBatches || row.batches || row.batch || row.Batch;
+          if (batchField && batchField !== 'All (Leave Blank)') {
+            const batchTokens = String(batchField).split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+            const resolvedIds: string[] = [];
+            for (const t of batchTokens) {
+              const foundB = fetchedBatches.find(b => 
+                b.id.toLowerCase() === t ||
+                String(b.batchCode || '').trim().toLowerCase() === t ||
+                String(b.batchName || '').trim().toLowerCase() === t
+              );
+              if (foundB) resolvedIds.push(foundB.id);
+            }
+            if (resolvedIds.length > 0) {
+              if (config.collection === 'user_roles') {
+                payload.batchIds = resolvedIds;
+              } else {
+                payload.batchId = resolvedIds[0];
+              }
+            }
+          }
+
+          // 3. Email standardization
+          const rawEmail = row.email || row.Email || row.userEmail;
+          if (rawEmail) {
+            payload.email = String(rawEmail).toLowerCase().trim();
+          }
+
+          // 4. Uniform Role normalization
+          if (config.collection === 'user_roles') {
+            let roleVal = String(row.role || row.Role || 'teacher').toLowerCase().trim();
+            if (roleVal === 'center_level' || roleVal === 'center') {
+              roleVal = 'center';
+            } else if (roleVal === 'central_team' || roleVal === 'operator' || roleVal === 'central') {
+              roleVal = 'central';
+            }
+            payload.role = roleVal;
+          }
+
+          payload.isActive = row.isActive ?? true;
+          payload.createdAt = Timestamp.now();
+
+          // Write records sequentially with correct Document IDs where expected!
+          if (config.collection === 'user_roles' && payload.email) {
+            const docId = payload.email;
+            await setDoc(doc(db, 'user_roles', docId), payload);
+          } else if (config.collection === 'teachers' && payload.email) {
+            const docId = payload.email;
+            await setDoc(doc(db, 'teachers', docId), payload);
+          } else if (config.collection === 'mappings' && payload.teacherId && payload.batchId) {
+            const docId = `${payload.teacherId}_${payload.batchId}`;
+            await setDoc(doc(db, 'mappings', docId), payload);
+          } else {
+            if (row.id) {
+              await setDoc(doc(db, config.collection, String(row.id)), payload);
+            } else {
+              await addDoc(colRef, payload);
+            }
+          }
           count++;
         }
         
@@ -256,7 +372,8 @@ export default function Masters() {
           centers: LogCategory.CENTER,
           batches: LogCategory.BATCH,
           qbg: LogCategory.QBG,
-          students: LogCategory.STUDENT
+          students: LogCategory.STUDENT,
+          user_roles: LogCategory.AUTH
         };
         
         await addLog({
@@ -275,7 +392,7 @@ export default function Masters() {
       reader.readAsArrayBuffer(file);
     } catch (err) {
       console.error(err);
-      alert('Import failed. Please check your file.');
+      toast.error('Import failed. Please check your file.');
     } finally {
       setImporting(false);
     }
