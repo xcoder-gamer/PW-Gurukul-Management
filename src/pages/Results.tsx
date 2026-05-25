@@ -247,9 +247,10 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     chapterStats[chap].total++;
 
     if (!subjectStats[subject]) {
-      subjectStats[subject] = { total: 0, correct: 0, wrong: 0, blank: 0, score: 0, subjectId };
+      subjectStats[subject] = { total: 0, correct: 0, wrong: 0, blank: 0, score: 0, maxScore: 0, subjectId };
     }
     subjectStats[subject].total++;
+    subjectStats[subject].maxScore += correctPoints;
 
     if (topic) {
       if (!topicStats[topic]) {
@@ -3023,6 +3024,57 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     return val;
   };
 
+  const getRawSubjectObj = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): any => {
+    if (!res || !res.subjectStats || res.isAbsent) return null;
+    const stats = res.subjectStats;
+
+    const normalizedStats: Record<string, any> = {};
+    Object.entries(stats).forEach(([k, v]) => {
+      normalizedStats[k.toLowerCase().trim()] = v;
+    });
+
+    let val: any = null;
+    if (subType === 'Physics') {
+      val = normalizedStats.physics ?? normalizedStats.ph;
+    } else if (subType === 'Chemistry') {
+      val = normalizedStats.chemistry ?? normalizedStats.ch;
+    } else if (subType === 'Math') {
+      val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
+    } else if (subType === 'Botany') {
+      val = normalizedStats.botany ?? normalizedStats.bot;
+    } else if (subType === 'Zoology') {
+      val = normalizedStats.zoology ?? normalizedStats.zoo;
+    } else if (subType === 'Biology') {
+      val = normalizedStats.biology ?? normalizedStats.bio;
+    }
+
+    if (!val || typeof val !== 'object') return null;
+    return val;
+  };
+
+  const getTotalSubjectMark = (subStat: any, subName: string, testPattern: string, isMedical: boolean) => {
+    if (subStat && subStat.maxScore) return subStat.maxScore;
+    const name = subName.toLowerCase();
+    const pattern = (testPattern || '').toUpperCase();
+    if (pattern === 'NEET' || isMedical) {
+      if (name.includes('phys')) return 180;
+      if (name.includes('chem')) return 180;
+      if (name.includes('bot')) return 180;
+      if (name.includes('zoo')) return 180;
+      if (name.includes('bio')) return 360;
+      return 180;
+    }
+    if (pattern === 'JEE_MAIN') {
+      return 100;
+    }
+    if (pattern === 'JEE_ADVANCED') {
+      if (subStat && subStat.total) return subStat.total * 4;
+      return 120;
+    }
+    if (subStat && subStat.total) return subStat.total * 4;
+    return 100;
+  };
+
   const comparisonGridData = useMemo(() => {
     // Standardize allCompResults. If subjectStats is empty or missing, evaluate it dynamically.
     const resolvedResults = allCompResults.map(res => {
@@ -4498,6 +4550,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               
               .print-comparison-matrix tr {
                 page-break-inside: avoid !important;
+                border-bottom: 2px solid #94a3b8 !important;
               }
 
               /* Explicit solid light gray grid borders for standard laser printing */
@@ -4786,7 +4839,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           return (
                             <th 
                               key={testMeta.testId} 
-                              colSpan={5} 
+                              colSpan={isMedicalProgram ? 6 : 5} 
                               className={cn(
                                 "px-4 py-3 text-center border-r-2 border-r-slate-800 font-extrabold tracking-widest uppercase text-[10px] font-mono",
                                 idx === 0 ? "bg-blue-950 text-blue-200" : "bg-slate-900 text-slate-300"
@@ -4812,9 +4865,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           <React.Fragment key={testMeta.testId}>
                             <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Physics</th>
                             <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Chemistry</th>
-                            <th className="p-3 text-center border-r border-slate-700 w-28 text-blue-300">
-                              {isMedicalProgram ? 'Botany & Zoology' : 'Mathematics'}
-                            </th>
+                            {isMedicalProgram ? (
+                              <>
+                                <th className="p-3 text-center border-r border-slate-700 w-22 text-blue-300">Botany</th>
+                                <th className="p-3 text-center border-r border-slate-700 w-22 text-blue-300">Zoology</th>
+                              </>
+                            ) : (
+                              <th className="p-3 text-center border-r border-slate-700 w-28 text-emerald-300">Mathematics</th>
+                            )}
                             <th className="p-3 text-center border-r border-slate-700 min-w-[95px] text-white">Cumulative Marks</th>
                             <th className="p-3 text-center border-r-2 border-r-slate-800 w-14 text-amber-400 bg-slate-900/40">Rank</th>
                           </React.Fragment>
@@ -4824,7 +4882,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     <tbody className="divide-y divide-slate-100">
                       {comparisonGridData.students.map((studentItem) => {
                         return (
-                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20">
+                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300">
                             {/* Student Details sticky first column */}
                             <td className="px-6 py-4.5 border-r-2 border-slate-300 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
                               <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">{studentItem.studentName}</div>
@@ -4868,7 +4926,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   <React.Fragment key={testMeta.testId}>
                                     <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
                                     <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
-                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    {isMedicalProgram ? (
+                                      <>
+                                        <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                        <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                      </>
+                                    ) : (
+                                      <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    )}
                                     <td className="p-3 text-center border-r border-slate-100 bg-slate-50/30 text-slate-350 italic font-medium font-sans text-[10px]">Absent</td>
                                     <td className="p-3 text-center border-r-2 border-r-slate-300 bg-slate-50/40 text-slate-350 font-mono font-medium">—</td>
                                   </React.Fragment>
@@ -4877,23 +4942,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
                               const phScore = getSubjectScore(testRes, 'Physics');
                               const chScore = getSubjectScore(testRes, 'Chemistry');
-                              
-                              // Handle botany zoology details combined cell
-                              let thirdCellText = '';
-                              if (isMedicalProgram) {
-                                const bot = getSubjectScore(testRes, 'Botany');
-                                const zoo = getSubjectScore(testRes, 'Zoology');
-                                const bio = getSubjectScore(testRes, 'Biology');
-                                if (bot !== '—' || zoo !== '—') {
-                                  thirdCellText = `B: ${bot} | Z: ${zoo}`;
-                                } else if (bio !== '—') {
-                                  thirdCellText = `Bi: ${bio}`;
-                                } else {
-                                  thirdCellText = '—';
-                                }
-                              } else {
-                                thirdCellText = String(getSubjectScore(testRes, 'Math'));
-                              }
+                              const botScore = getSubjectScore(testRes, 'Botany');
+                              const zooScore = getSubjectScore(testRes, 'Zoology');
+                              const mathScore = getSubjectScore(testRes, 'Math');
 
                               const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
                               const testObj = tests.find(t => t.id === testMeta.testId);
@@ -4904,20 +4955,155 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               return (
                                 <React.Fragment key={testMeta.testId}>
                                   {/* Physics */}
-                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-sm">
-                                    {testRes.isAbsent ? '—' : phScore}
+                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-xs">
+                                    {testRes.isAbsent ? '—' : (
+                                      isCurrentTest ? (
+                                        <div className="space-y-1 my-1">
+                                          <div className="text-sm font-black text-slate-900 border-b border-slate-100 pb-0.5">
+                                            {phScore}
+                                            <span className="text-[9px] font-bold text-slate-400">/{getTotalSubjectMark(getRawSubjectObj(testRes, 'Physics'), 'Physics', testRes.testPattern, isMedicalProgram)}</span>
+                                          </div>
+                                          {(() => {
+                                            const s = getRawSubjectObj(testRes, 'Physics');
+                                            return s ? (
+                                              <div className="text-[8.5px] leading-tight text-slate-500 font-bold space-y-0.5 whitespace-nowrap">
+                                                <div className="flex justify-between items-center gap-2">
+                                                  <span className="text-emerald-600">C: {s.correct ?? 0}</span>
+                                                  <span className="text-red-500">I: {s.wrong ?? 0}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center gap-2">
+                                                  <span className="text-slate-400">U: {s.blank ?? 0}</span>
+                                                  <span className="text-slate-450 font-medium">Q: {s.total ?? 0}</span>
+                                                </div>
+                                              </div>
+                                            ) : null;
+                                          })()}
+                                        </div>
+                                      ) : phScore
+                                    )}
                                   </td>
+
                                   {/* Chemistry */}
-                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-sm">
-                                    {testRes.isAbsent ? '—' : chScore}
+                                  <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-xs">
+                                    {testRes.isAbsent ? '—' : (
+                                      isCurrentTest ? (
+                                        <div className="space-y-1 my-1">
+                                          <div className="text-sm font-black text-slate-900 border-b border-slate-100 pb-0.5">
+                                            {chScore}
+                                            <span className="text-[9px] font-bold text-slate-400">/{getTotalSubjectMark(getRawSubjectObj(testRes, 'Chemistry'), 'Chemistry', testRes.testPattern, isMedicalProgram)}</span>
+                                          </div>
+                                          {(() => {
+                                            const s = getRawSubjectObj(testRes, 'Chemistry');
+                                            return s ? (
+                                              <div className="text-[8.5px] leading-tight text-slate-500 font-bold space-y-0.5 whitespace-nowrap">
+                                                <div className="flex justify-between items-center gap-2">
+                                                  <span className="text-emerald-600">C: {s.correct ?? 0}</span>
+                                                  <span className="text-red-500">I: {s.wrong ?? 0}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center gap-2">
+                                                  <span className="text-slate-400">U: {s.blank ?? 0}</span>
+                                                  <span className="text-slate-455 font-medium">Q: {s.total ?? 0}</span>
+                                                </div>
+                                              </div>
+                                            ) : null;
+                                          })()}
+                                        </div>
+                                      ) : chScore
+                                    )}
                                   </td>
-                                  {/* Math / botany zoology */}
-                                  <td className={cn(
-                                    "p-3 text-center border-r border-slate-100 font-extrabold whitespace-nowrap font-mono text-sm",
-                                    isMedicalProgram ? "text-slate-600 text-[10px]" : "text-indigo-600"
-                                  )}>
-                                    {testRes.isAbsent ? '—' : thirdCellText}
-                                  </td>
+
+                                  {/* Botany & Zoology or Maths */}
+                                  {isMedicalProgram ? (
+                                    <>
+                                      {/* Botany Cell */}
+                                      <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-xs">
+                                        {testRes.isAbsent ? '—' : (
+                                          isCurrentTest ? (
+                                            <div className="space-y-1 my-1">
+                                              <div className="text-sm font-black text-slate-900 border-b border-slate-100 pb-0.5">
+                                                {botScore}
+                                                <span className="text-[9px] font-bold text-slate-400">/{getTotalSubjectMark(getRawSubjectObj(testRes, 'Botany'), 'Botany', testRes.testPattern, isMedicalProgram)}</span>
+                                              </div>
+                                              {(() => {
+                                                const s = getRawSubjectObj(testRes, 'Botany');
+                                                return s ? (
+                                                  <div className="text-[8.5px] leading-tight text-slate-500 font-bold space-y-0.5 whitespace-nowrap">
+                                                    <div className="flex justify-between items-center gap-2">
+                                                      <span className="text-emerald-600">C: {s.correct ?? 0}</span>
+                                                      <span className="text-red-500">I: {s.wrong ?? 0}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center gap-2">
+                                                      <span className="text-slate-400">U: {s.blank ?? 0}</span>
+                                                      <span className="text-slate-455 font-medium">Q: {s.total ?? 0}</span>
+                                                    </div>
+                                                  </div>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : botScore
+                                        )}
+                                      </td>
+
+                                      {/* Zoology Cell */}
+                                      <td className="p-3 text-center border-r border-slate-100 font-extrabold text-slate-800 font-mono text-xs">
+                                        {testRes.isAbsent ? '—' : (
+                                          isCurrentTest ? (
+                                            <div className="space-y-1 my-1">
+                                              <div className="text-sm font-black text-slate-900 border-b border-slate-100 pb-0.5">
+                                                {zooScore}
+                                                <span className="text-[9px] font-bold text-slate-400">/{getTotalSubjectMark(getRawSubjectObj(testRes, 'Zoology'), 'Zoology', testRes.testPattern, isMedicalProgram)}</span>
+                                              </div>
+                                              {(() => {
+                                                const s = getRawSubjectObj(testRes, 'Zoology');
+                                                return s ? (
+                                                  <div className="text-[8.5px] leading-tight text-slate-500 font-bold space-y-0.5 whitespace-nowrap">
+                                                    <div className="flex justify-between items-center gap-2">
+                                                      <span className="text-emerald-600">C: {s.correct ?? 0}</span>
+                                                      <span className="text-red-500">I: {s.wrong ?? 0}</span>
+                                                    </div>
+                                                    <div className="flex justify-between items-center gap-2">
+                                                      <span className="text-slate-400">U: {s.blank ?? 0}</span>
+                                                      <span className="text-slate-455 font-medium">Q: {s.total ?? 0}</span>
+                                                    </div>
+                                                  </div>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : zooScore
+                                        )}
+                                      </td>
+                                    </>
+                                  ) : (
+                                    /* Math Cell */
+                                    <td className="p-3 text-center border-r border-slate-100 font-extrabold text-indigo-655 font-mono text-xs">
+                                      {testRes.isAbsent ? '—' : (
+                                        isCurrentTest ? (
+                                          <div className="space-y-1 my-1">
+                                            <div className="text-sm font-black text-indigo-700 border-b border-slate-100 pb-0.5">
+                                              {mathScore}
+                                              <span className="text-[9px] font-bold text-slate-400">/{getTotalSubjectMark(getRawSubjectObj(testRes, 'Math'), 'Math', testRes.testPattern, isMedicalProgram)}</span>
+                                            </div>
+                                            {(() => {
+                                              const s = getRawSubjectObj(testRes, 'Math');
+                                              return s ? (
+                                                <div className="text-[8.5px] leading-tight text-slate-500 font-bold space-y-0.5 whitespace-nowrap">
+                                                  <div className="flex justify-between items-center gap-2">
+                                                    <span className="text-emerald-600">C: {s.correct ?? 0}</span>
+                                                    <span className="text-red-500">I: {s.wrong ?? 0}</span>
+                                                  </div>
+                                                  <div className="flex justify-between items-center gap-2">
+                                                    <span className="text-slate-400">U: {s.blank ?? 0}</span>
+                                                    <span className="text-slate-455 font-medium">Q: {s.total ?? 0}</span>
+                                                  </div>
+                                                </div>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        ) : mathScore
+                                      )}
+                                    </td>
+                                  )}
+
                                   {/* All Detail */}
                                   <td 
                                     className={cn(
@@ -4992,7 +5178,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               </Card>
 
               {/* Grid Pagination / Bottom Stats footnote */}
-              <div className="flex flex-col md:flex-row justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 gap-3">
+              <div className="flex flex-col md:flex-row justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 gap-3 print:hidden">
                 <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono">
                   Gurukul Analytical Engine &copy; Multi-Student Cumulative Matrix
                 </span>
@@ -5256,8 +5442,8 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
       {/* Printable Scorecard Brand Header */}
       <div className="hidden print:flex items-center justify-between border-b pb-4 mb-2 border-slate-200">
         <div className="space-y-1 text-left">
-          <h1 className="text-xl font-black text-slate-900 tracking-tight">PW GURUKUL ACADEMY</h1>
-          <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Official Test Scorecard & Evaluation Report</p>
+          <h1 className="text-xl font-black text-slate-900 tracking-tight">STUDENT EVALUATION REPORT</h1>
+          <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Official Test Scorecard & Detailed Analytics</p>
         </div>
         <div className="text-right space-y-0.5">
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Date Printed</p>
