@@ -466,6 +466,156 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
   };
 };
 
+export const standardizeSubjectStats = (stats: any) => {
+  if (!stats) return {};
+  const normalized: Record<string, any> = {};
+  const subjectsList = ['Physics', 'Chemistry', 'Math', 'Botany', 'Zoology', 'Biology'];
+  
+  if (Array.isArray(stats)) {
+    stats.forEach((s: any) => {
+      if (s && s.name) {
+        const matchingSub = subjectsList.find(sub => 
+          sub.toLowerCase() === s.name.toLowerCase().trim() ||
+          (sub === 'Math' && (s.name.toLowerCase().trim() === 'maths' || s.name.toLowerCase().trim() === 'mathematics'))
+        );
+        if (matchingSub) {
+          const score = s.score !== undefined ? s.score : s.Score;
+          normalized[matchingSub] = { 
+            ...s, 
+            score: typeof score === 'number' ? score : Number(score) || 0 
+          };
+        }
+      }
+    });
+  } else if (typeof stats === 'object') {
+    Object.entries(stats).forEach(([k, v]) => {
+      if (k && v) {
+        const matchingSub = subjectsList.find(sub => 
+          sub.toLowerCase() === k.toLowerCase().trim() ||
+          (sub === 'Math' && (k.toLowerCase().trim() === 'maths' || k.toLowerCase().trim() === 'mathematics'))
+        );
+        if (matchingSub) {
+          if (typeof v === 'object') {
+            const score = (v as any).score !== undefined ? (v as any).score : (v as any).Score;
+            normalized[matchingSub] = { 
+              ...(v as any), 
+              score: typeof score === 'number' ? score : Number(score) || 0 
+            };
+          } else {
+            normalized[matchingSub] = { score: typeof v === 'number' ? v : Number(v) || 0 };
+          }
+        }
+      }
+    });
+  }
+  return normalized;
+};
+
+export const getSubjectScore = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): string | number => {
+  if (!res || !res.subjectStats || res.isAbsent) return '—';
+  const stats = res.subjectStats;
+
+  let normalizedStats: Record<string, any> = {};
+  if (Array.isArray(stats)) {
+    stats.forEach((s: any) => {
+      if (s && s.name) {
+        normalizedStats[s.name.toLowerCase().trim()] = s;
+      }
+    });
+  } else if (typeof stats === 'object') {
+    Object.entries(stats).forEach(([k, v]) => {
+      if (k && v) {
+        normalizedStats[k.toLowerCase().trim()] = v;
+      }
+    });
+  }
+
+  let val: any = null;
+  const subLower = subType.toLowerCase();
+  if (subLower === 'physics') {
+    val = normalizedStats.physics ?? normalizedStats.ph;
+  } else if (subLower === 'chemistry') {
+    val = normalizedStats.chemistry ?? normalizedStats.ch;
+  } else if (subLower === 'math' || subLower === 'maths' || subLower === 'mathematics') {
+    val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
+  } else if (subLower === 'botany') {
+    val = normalizedStats.botany ?? normalizedStats.bot;
+  } else if (subLower === 'zoology') {
+    val = normalizedStats.zoology ?? normalizedStats.zoo;
+  } else if (subLower === 'biology') {
+    val = normalizedStats.biology ?? normalizedStats.bio;
+  }
+
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'object') {
+    const score = val.score !== undefined ? val.score : val.Score;
+    return score !== undefined ? score : '—';
+  }
+  return val;
+};
+
+export const getRawSubjectObj = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): any => {
+  if (!res || !res.subjectStats || res.isAbsent) return null;
+  const stats = res.subjectStats;
+
+  let normalizedStats: Record<string, any> = {};
+  if (Array.isArray(stats)) {
+    stats.forEach((s: any) => {
+      if (s && s.name) {
+        normalizedStats[s.name.toLowerCase().trim()] = s;
+      }
+    });
+  } else if (typeof stats === 'object') {
+    Object.entries(stats).forEach(([k, v]) => {
+      if (k && v) {
+        normalizedStats[k.toLowerCase().trim()] = v;
+      }
+    });
+  }
+
+  let val: any = null;
+  const subLower = subType.toLowerCase();
+  if (subLower === 'physics') {
+    val = normalizedStats.physics ?? normalizedStats.ph;
+  } else if (subLower === 'chemistry') {
+    val = normalizedStats.chemistry ?? normalizedStats.ch;
+  } else if (subLower === 'math' || subLower === 'maths' || subLower === 'mathematics') {
+    val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
+  } else if (subLower === 'botany') {
+    val = normalizedStats.botany ?? normalizedStats.bot;
+  } else if (subLower === 'zoology') {
+    val = normalizedStats.zoology ?? normalizedStats.zoo;
+  } else if (subLower === 'biology') {
+    val = normalizedStats.biology ?? normalizedStats.bio;
+  }
+
+  if (!val || typeof val !== 'object') return null;
+  return val;
+};
+
+export const getTotalSubjectMark = (subStat: any, subName: string, testPattern: string, isMedical: boolean) => {
+  if (subStat && subStat.maxScore) return subStat.maxScore;
+  const name = subName.toLowerCase();
+  const pattern = (testPattern || '').toUpperCase();
+  if (pattern === 'NEET' || isMedical) {
+    if (name.includes('phys')) return 180;
+    if (name.includes('chem')) return 180;
+    if (name.includes('bot')) return 180;
+    if (name.includes('zoo')) return 180;
+    if (name.includes('bio')) return 360;
+    return 180;
+  }
+  if (pattern === 'JEE_MAIN') {
+    return 100;
+  }
+  if (pattern === 'JEE_ADVANCED') {
+    if (subStat && subStat.total) return subStat.total * 4;
+    return 120;
+  }
+  if (subStat && subStat.total) return subStat.total * 4;
+  return 100;
+};
+
 export default function Results() {
   const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
@@ -733,6 +883,18 @@ export default function Results() {
     return ranked;
   }, [results, filters, selectedTestIds, resultsSortConfig, searchTerm]);
 
+  const isMedicalFromTestsOnly = useMemo(() => {
+    if (selectedTestIds.length === 0) return false;
+    const activeTest = tests.find(t => t.id === selectedTestIds[0]);
+    if (!activeTest) return false;
+    const activeProgram = metaPrograms.find((p: any) => p.id === activeTest.programId);
+    const progName = (activeProgram?.programName || '').toUpperCase();
+    const progCode = (activeProgram?.programCode || '').toUpperCase();
+    return progName.includes('NEET') || progName.includes('MED') || 
+           progCode.includes('NEET') || progCode.includes('MED') || 
+           (activeTest.pattern && activeTest.pattern.toUpperCase().includes('NEET'));
+  }, [selectedTestIds, tests, metaPrograms]);
+
   const allAvailableSubjects = useMemo(() => {
     const subjects = new Set<string>();
     results.forEach(res => {
@@ -752,8 +914,32 @@ export default function Results() {
         }
       }
     });
-    return Array.from(subjects).sort();
-  }, [results]);
+
+    const list = Array.from(subjects);
+    
+    // Sort sequence:
+    // JEE: Physics, Chemistry, Maths
+    // NEET: Physics, Chemistry, Botany, Zoology
+    let priorityList: string[] = [];
+    if (isMedicalFromTestsOnly) {
+      priorityList = ['Physics', 'Chemistry', 'Botany', 'Zoology', 'Biology'];
+    } else {
+      priorityList = ['Physics', 'Chemistry', 'Math', 'Maths', 'Mathematics'];
+    }
+
+    return list.sort((a, b) => {
+      const indexA = priorityList.findIndex(p => p.toLowerCase() === a.toLowerCase() || (a.toLowerCase() === 'mathematics' && p.toLowerCase() === 'math'));
+      const indexB = priorityList.findIndex(p => p.toLowerCase() === b.toLowerCase() || (b.toLowerCase() === 'mathematics' && p.toLowerCase() === 'math'));
+      
+      const valA = indexA === -1 ? 999 : indexA;
+      const valB = indexB === -1 ? 999 : indexB;
+      
+      if (valA !== valB) {
+        return valA - valB;
+      }
+      return a.localeCompare(b);
+    });
+  }, [results, isMedicalFromTestsOnly]);
   const masters = useMemo(() => ({
     programs: metaPrograms,
     centers: metaCenters,
@@ -1157,7 +1343,13 @@ export default function Results() {
   const fetchTests = async () => {
     try {
       const snap = await getDocs(query(collection(db, 'tests'), limit(150)));
-      setTests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      fetched.sort((a: any, b: any) => {
+        const dateA = a.date || '';
+        const dateB = b.date || '';
+        return dateB.localeCompare(dateA);
+      });
+      setTests(fetched);
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'tests');
     }
@@ -1250,11 +1442,16 @@ export default function Results() {
         }
       });
 
-      setResults(mergedResults);
+      const normalizedResults = mergedResults.map(r => ({
+        ...r,
+        subjectStats: standardizeSubjectStats(r.subjectStats)
+      }));
+
+      setResults(normalizedResults);
       
       // Keep selectedResult in sync if it's currently open
       if (selectedResult) {
-        const updated = mergedResults.find(r => r.id === selectedResult.id);
+        const updated = normalizedResults.find(r => r.id === selectedResult.id);
         if (updated) setSelectedResult(updated);
       }
     } catch (err) {
@@ -1266,9 +1463,7 @@ export default function Results() {
 
   const handleTestToggle = (testId: string) => {
     setSelectedTestIds(prev => {
-      const next = prev.includes(testId) 
-        ? prev.filter(id => id !== testId)
-        : [...prev, testId];
+      const next = prev.includes(testId) ? [] : [testId];
       fetchResults(next);
       return next;
     });
@@ -1395,14 +1590,30 @@ export default function Results() {
             </div>
           )}
 
-          <div className="space-y-1">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Performance</p>
-            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Results & Analytics</h1>
-            <p className="text-slate-500 font-medium text-sm">
-              {view === 'analytics' 
-                ? 'Comparative analytics and standard deviation dashboard across multiple test series.' 
-                : 'View detailed rankings, accuracy reports and student performance metrics.'}
-            </p>
+          <div className="flex items-center gap-4">
+            {view === 'table' && selectedTestIds.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => {
+                  setSelectedTestIds([]);
+                  setResults([]);
+                }}
+                className="h-12 w-12 rounded-2xl border-slate-200 flex items-center justify-center p-0 flex-shrink-0"
+                title="Back to Test Selection"
+              >
+                <ChevronLeft size={20} strokeWidth={3} className="text-slate-600" />
+              </Button>
+            )}
+            <div className="space-y-1">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Performance</p>
+              <h1 className="text-4xl font-black text-slate-900 tracking-tight">Results & Analytics</h1>
+              <p className="text-slate-500 font-medium text-sm">
+                {view === 'analytics' 
+                  ? 'Comparative analytics and standard deviation dashboard across multiple test series.' 
+                  : 'View detailed rankings, accuracy reports and student performance metrics.'}
+              </p>
+            </div>
           </div>
         </div>
 
@@ -1444,17 +1655,7 @@ export default function Results() {
               </Button>
             )}
 
-            {(role === 'admin' || role === 'central' || role === 'center' || role === 'teacher') && (
-              <Button 
-                variant="outline" 
-                size="md" 
-                onClick={() => setIsAdvancedFilterOpen(true)} 
-                className={cn("border-slate-200", (filters.minAccuracy > 0 || filters.minMathAccuracy > 0 || filters.topOnly) && "border-blue-300 bg-blue-50")}
-              >
-                <Filter size={18} className="mr-2 text-blue-600" />
-                Advanced Filter
-              </Button>
-            )}
+
             {canEdit && (
               <Button variant="primary" size="md" onClick={() => {
                 if (selectedTestIds.length === 0) {
@@ -1551,44 +1752,103 @@ export default function Results() {
       ) : (
         <>
           {selectedTestIds.length > 0 ? (() => {
-        const validResultsSummary = results.filter(r => !r.isAbsent);
-        return (
-          <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-8 relative overflow-hidden shadow-xl shadow-blue-100">
-            <div className="relative z-10 space-y-6">
-              <div>
-                <p className="text-blue-100 text-[10px] font-black uppercase tracking-[0.2em]">Highest Performance</p>
-                <h3 className="text-2xl font-black tracking-tight mt-1">
-                  {selectedTestIds.length === 1 
-                    ? tests.find(t => t.id === selectedTestIds[0])?.name 
-                    : `${selectedTestIds.length} Tests Summary`}
-                </h3>
-              </div>
-              <div className="flex space-x-8">
-                <div className="space-y-1">
-                  <p className="text-4xl font-black leading-none">
-                    {results.length > 0 ? (results[0]?.score || 0) : 0}
-                    {selectedTestIds.length === 1 && (
-                      <span className="text-lg font-bold text-blue-200">
-                        /{tests.find(t => t.id === selectedTestIds[0])?.maxScore || 300}
+            const validResultsSummary = results.filter(r => !r.isAbsent);
+            const isMedical = isMedicalFromTestsOnly;
+            
+            const validTotalScores = validResultsSummary.map(r => r.score || 0);
+            const totalHighest = validTotalScores.length > 0 ? Math.max(...validTotalScores) : 0;
+            const totalAvg = validTotalScores.length > 0 ? Math.round(validTotalScores.reduce((a, b) => a + b, 0) / validTotalScores.length) : 0;
+            
+            const totalMax = selectedTestIds.length === 1 ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 720) : null;
+
+            const displaySubjects = isMedical 
+              ? ['Physics', 'Chemistry', 'Botany', 'Zoology'] 
+              : ['Physics', 'Chemistry', 'Math'];
+
+            const subjectStats = displaySubjects.map(subName => {
+              const validScores = results
+                .filter(r => !r.isAbsent)
+                .map(r => {
+                  const score = getSubjectScore(r, subName as any);
+                  return typeof score === 'number' ? score : null;
+                })
+                .filter((v): v is number => v !== null);
+
+              if (validScores.length === 0) {
+                return { name: subName, highest: '—', avg: '—' };
+              }
+              const highestVal = Math.max(...validScores);
+              const avgVal = Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
+              return { name: subName, highest: highestVal, avg: avgVal };
+            });
+
+            return (
+              <Card className="bg-gradient-to-br from-blue-700 via-indigo-700 to-violet-800 text-white p-5 relative overflow-hidden shadow-xl shadow-blue-100 rounded-2xl">
+                <div className="absolute right-[-5%] bottom-[0%] opacity-10 pointer-events-none">
+                  <BarChart3 size={150} strokeWidth={1} />
+                </div>
+
+                <div className="relative z-10 space-y-3.5">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-white/10 pb-3">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-[0.2em] bg-white/15 px-2.5 py-0.5 rounded-full text-blue-100 border border-white/5 shadow-inner">
+                        BATCH PERFORMANCE SUMMARY
                       </span>
-                    )}
-                  </p>
-                  <p className="text-[10px] text-blue-100 font-bold uppercase tracking-widest opacity-80">Max Score</p>
+                      <h3 className="text-lg font-black tracking-tight mt-1 text-white">
+                        {selectedTestIds.length === 1 
+                          ? tests.find(t => t.id === selectedTestIds[0])?.name 
+                          : `${selectedTestIds.length} Combined Test Series`}
+                      </h3>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {/* Single Liner for Max Score */}
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-2 bg-white/5 backdrop-blur-sm rounded-xl px-4 py-2.5 border border-white/10">
+                      <div className="flex items-center gap-2 min-w-[160px]">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">MAX (HIGHEST):</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 flex-1">
+                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                          <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">TOTAL</span>
+                          <span className="text-sm font-black text-white">{totalHighest}</span>
+                          {totalMax && <span className="text-[10px] font-bold text-blue-300">/{totalMax}</span>}
+                        </div>
+                        {subjectStats.map(s => (
+                          <div key={`max-${s.name}`} className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                            <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">{s.name}</span>
+                            <span className="text-sm font-black text-white">{s.highest}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Single Liner for Average Score */}
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-2 bg-white/5 backdrop-blur-sm rounded-xl px-4 py-2.5 border border-white/10">
+                      <div className="flex items-center gap-2 min-w-[160px]">
+                        <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                        <span className="text-[11px] font-black uppercase tracking-wider text-amber-300">AVERAGE SCORES:</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 flex-1">
+                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                          <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">TOTAL</span>
+                          <span className="text-sm font-black text-white">{totalAvg}</span>
+                          {totalMax && <span className="text-[10px] font-bold text-blue-300">/{totalMax}</span>}
+                        </div>
+                        {subjectStats.map(s => (
+                          <div key={`avg-${s.name}`} className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
+                            <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">{s.name}</span>
+                            <span className="text-sm font-black text-white">{s.avg}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-4xl font-black leading-none">
-                    {validResultsSummary.length > 0 ? Math.round(validResultsSummary.reduce((acc, r) => acc + (r.score || 0), 0) / validResultsSummary.length) : 0}
-                  </p>
-                  <p className="text-[10px] text-blue-100 font-bold uppercase tracking-widest opacity-80">Batch Avg (Present)</p>
-                </div>
-              </div>
-            </div>
-            <div className="absolute right-[-10%] bottom-[-10%] opacity-15">
-               <BarChart3 size={180} strokeWidth={1} />
-            </div>
-          </Card>
-        );
-      })() : null}
+              </Card>
+            );
+          })() : null}
 
       {selectedTestIds.length > 0 ? (
         <>
@@ -1623,11 +1883,11 @@ export default function Results() {
             </div>
           )}
           <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto no-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[1400px]">
-              <thead className="bg-slate-50/50">
+          <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
+            <table className="w-full text-left border-collapse min-w-[1200px]">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
-                  <th className="px-6 py-5 w-10">
+                  <th className="px-6 py-5 w-10 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">
                     <input 
                       type="checkbox" 
                       className="rounded border-slate-300"
@@ -1642,38 +1902,18 @@ export default function Results() {
                     />
                   </th>
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'testDate' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'testDate', direction: dir });
-                    }}
-                  >
-                    Test Date {resultsSortConfig?.key === 'testDate' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th className="px-6 py-5">Test Name</th>
-                  <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'regNo' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'regNo', direction: dir });
-                    }}
-                  >
-                    Reg No. {resultsSortConfig?.key === 'regNo' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'studentName' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'studentName', direction: dir });
                     }}
                   >
-                    Student Name {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
+                    Student {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5">Center Name</th>
-                  <th className="px-6 py-5">Batch</th>
-                  <th className="px-6 py-5">Mode</th>
+                  <th className="px-6 py-5 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Program & Center</th>
+                  <th className="px-6 py-5 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Mode</th>
                   <th 
-                    className="px-6 py-5 text-center bg-blue-50/30 cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-6 py-5 text-center bg-blue-50/30 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-blue-50/95 backdrop-blur-md z-20"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'score' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'score', direction: dir });
@@ -1684,7 +1924,7 @@ export default function Results() {
                   {allAvailableSubjects.map(sub => (
                     <th 
                       key={sub}
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
                       onClick={() => {
                         const dir = resultsSortConfig?.key === `subject_${sub}` && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setResultsSortConfig({ key: `subject_${sub}`, direction: dir });
@@ -1694,7 +1934,7 @@ export default function Results() {
                     </th>
                   ))}
                   <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'accuracy' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'accuracy', direction: dir });
@@ -1702,11 +1942,11 @@ export default function Results() {
                   >
                     % Accuracy {resultsSortConfig?.key === 'accuracy' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5 text-center">Rank</th>
-                  <th className="px-6 py-5 text-center">Correct</th>
-                  <th className="px-6 py-5 text-center">Wrong</th>
-                  <th className="px-6 py-5 text-center">Unattempt</th>
-                  {isAdmin && <th className="px-6 py-5 text-right">Action</th>}
+                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Rank</th>
+                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Correct</th>
+                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Wrong</th>
+                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Unattempt</th>
+                  {isAdmin && <th className="px-6 py-5 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -1731,38 +1971,30 @@ export default function Results() {
                           }}
                         />
                       </td>
-                      <td className="px-6 py-5 text-[10px] font-bold text-slate-400 uppercase">{res.testDate}</td>
+                      {/* Col A: Student Info */}
                       <td className="px-6 py-5">
                         <div className="flex flex-col">
-                          <span className="font-black text-slate-900 leading-tight">{res.testName}</span>
-                          <span className="text-[9px] font-mono font-bold text-slate-400/80 mt-0.5" title="Test ID">ID: {res.testId}</span>
+                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1.5">{res.regNo}</span>
+                          <span className="text-sm font-black text-slate-900 leading-snug">{res.studentName}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-5 text-[11px] font-bold text-blue-600 uppercase">{res.regNo}</td>
+                      {/* Col B: Student Details */}
                       <td className="px-6 py-5">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-black text-slate-900">{res.studentName}</span>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
-                            {res.type && (
-                              <span className="text-[9px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono">
-                                {res.type}
-                              </span>
-                            )}
-                            {res.rankTarget && (
-                              <span className="text-[9px] font-black text-amber-750 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 uppercase tracking-wide font-mono inline-flex items-center gap-0.5">
-                                <Target size={10} className="text-amber-500" />
-                                {res.rankTarget}
-                                {res.targetYear && (
-                                  <span className="text-slate-400 text-[8px] font-normal">({res.targetYear})</span>
-                                )}
-                              </span>
-                            )}
+                        <div className="flex flex-col gap-1 justify-start items-start">
+                          {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
+                          <div className="text-xs font-black text-slate-900 leading-normal">
+                            {res.programName || '—'}
                           </div>
+                          <div className="text-[11px] font-bold text-slate-400 leading-none">
+                            {res.centerName || '—'}
+                          </div>
+                          {res.type && (
+                            <span className="text-[8px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono select-none mt-1">
+                              {res.type}
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td className="px-6 py-5 text-sm font-bold text-slate-600">{res.centerName || '—'}</td>
-                      <td className="px-6 py-5 text-sm font-medium text-slate-500">{res.batchName || '—'}</td>
                       <td className="px-6 py-5">
                         <Badge variant={res.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] uppercase">
                           {res.testMode || 'offline'}
@@ -1862,7 +2094,7 @@ export default function Results() {
                     Select one or more test series below to trigger comparative analytics and combined scoreboard views.
                  </p>
               </div>
-              <div className="flex items-center gap-3 self-start md:self-auto">
+              <div className="flex items-center gap-3 self-start md:self-auto hidden">
                  <Button
                     variant="outline"
                     size="sm"
@@ -1978,6 +2210,14 @@ export default function Results() {
                                    <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded-lg">
                                       {t.pattern?.replace('_', ' ')}
                                    </span>
+                                   {t.programId && (() => {
+                                      const prog = metaPrograms.find((p: any) => p.id === t.programId);
+                                      return prog ? (
+                                        <span className="text-[10px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 px-2 py-1 rounded-lg">
+                                           {prog.programName}
+                                        </span>
+                                      ) : null;
+                                   })()}
                                 </div>
                              </div>
                           </button>
@@ -2048,31 +2288,14 @@ export default function Results() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-black text-slate-900 tracking-tight">Select Test</h2>
-              <p className="text-sm text-slate-400 font-bold">Pick one or more tests to analyze</p>
+              <p className="text-sm text-slate-400 font-bold">Select a test to view results</p>
             </div>
           </div>
 
           <div className="space-y-6">
             <div className="space-y-3">
               <div className="flex items-center justify-between ml-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Tests to Analyze</label>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-6 text-[9px] font-black"
-                  onClick={() => {
-                    if (selectedTestIds.length === tests.length) {
-                      setSelectedTestIds([]);
-                      setResults([]);
-                    } else {
-                      const allIds = tests.map(t => t.id);
-                      setSelectedTestIds(allIds);
-                      fetchResults(allIds);
-                    }
-                  }}
-                >
-                  {selectedTestIds.length === tests.length ? 'Deselect All' : 'Select All'}
-                </Button>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Test Series</label>
               </div>
               <div className="space-y-2 max-h-[30vh] overflow-y-auto pr-2 no-scrollbar">
                 {tests.map(t => (
@@ -3182,92 +3405,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     return name.includes('NEET') || name.includes('MED') || code.includes('NEET') || code.includes('MED');
   }, [selectedProgramId, metaPrograms]);
 
-  const getSubjectScore = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): string | number => {
-    if (!res || !res.subjectStats || res.isAbsent) return '—';
-    const stats = res.subjectStats;
-
-    // Normalize keys of stats to lowercase for complete case-insensitivity
-    const normalizedStats: Record<string, any> = {};
-    Object.entries(stats).forEach(([k, v]) => {
-      normalizedStats[k.toLowerCase().trim()] = v;
-    });
-
-    let val: any = null;
-    if (subType === 'Physics') {
-      val = normalizedStats.physics;
-      if (val === undefined || val === null) val = normalizedStats.ph;
-    } else if (subType === 'Chemistry') {
-      val = normalizedStats.chemistry;
-      if (val === undefined || val === null) val = normalizedStats.ch;
-    } else if (subType === 'Math') {
-      val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
-    } else if (subType === 'Botany') {
-      val = normalizedStats.botany ?? normalizedStats.bot;
-    } else if (subType === 'Zoology') {
-      val = normalizedStats.zoology ?? normalizedStats.zoo;
-    } else if (subType === 'Biology') {
-      val = normalizedStats.biology ?? normalizedStats.bio;
-    }
-
-    if (val === null || val === undefined) return '—';
-    if (typeof val === 'object') {
-      const score = val.score !== undefined ? val.score : val.Score;
-      return score !== undefined ? score : '—';
-    }
-    return val;
-  };
-
-  const getRawSubjectObj = (res: any, subType: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology'): any => {
-    if (!res || !res.subjectStats || res.isAbsent) return null;
-    const stats = res.subjectStats;
-
-    const normalizedStats: Record<string, any> = {};
-    Object.entries(stats).forEach(([k, v]) => {
-      normalizedStats[k.toLowerCase().trim()] = v;
-    });
-
-    let val: any = null;
-    if (subType === 'Physics') {
-      val = normalizedStats.physics ?? normalizedStats.ph;
-    } else if (subType === 'Chemistry') {
-      val = normalizedStats.chemistry ?? normalizedStats.ch;
-    } else if (subType === 'Math') {
-      val = normalizedStats.math ?? normalizedStats.maths ?? normalizedStats.mathematics;
-    } else if (subType === 'Botany') {
-      val = normalizedStats.botany ?? normalizedStats.bot;
-    } else if (subType === 'Zoology') {
-      val = normalizedStats.zoology ?? normalizedStats.zoo;
-    } else if (subType === 'Biology') {
-      val = normalizedStats.biology ?? normalizedStats.bio;
-    }
-
-    if (!val || typeof val !== 'object') return null;
-    return val;
-  };
-
-  const getTotalSubjectMark = (subStat: any, subName: string, testPattern: string, isMedical: boolean) => {
-    if (subStat && subStat.maxScore) return subStat.maxScore;
-    const name = subName.toLowerCase();
-    const pattern = (testPattern || '').toUpperCase();
-    if (pattern === 'NEET' || isMedical) {
-      if (name.includes('phys')) return 180;
-      if (name.includes('chem')) return 180;
-      if (name.includes('bot')) return 180;
-      if (name.includes('zoo')) return 180;
-      if (name.includes('bio')) return 360;
-      return 180;
-    }
-    if (pattern === 'JEE_MAIN') {
-      return 100;
-    }
-    if (pattern === 'JEE_ADVANCED') {
-      if (subStat && subStat.total) return subStat.total * 4;
-      return 120;
-    }
-    if (subStat && subStat.total) return subStat.total * 4;
-    return 100;
-  };
-
   const comparisonGridData = useMemo(() => {
     // Standardize allCompResults. If subjectStats is empty or missing, evaluate it dynamically.
     const resolvedResults = allCompResults.map(res => {
@@ -3463,6 +3600,60 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     if (comparisonTestMode === 'three') return comparisonGridData.chronTests.slice(0, 3);
     return comparisonGridData.chronTests; // 'all'
   }, [comparisonGridData.chronTests, comparisonTestMode]);
+
+  const testWiseStats = useMemo(() => {
+    const statsMap: Record<string, {
+      Physics: { max: number | string; avg: number | string };
+      Chemistry: { max: number | string; avg: number | string };
+      Botany: { max: number | string; avg: number | string };
+      Zoology: { max: number | string; avg: number | string };
+      Math: { max: number | string; avg: number | string };
+      Total: { max: number | string; avg: number | string };
+    }> = {};
+
+    displayedTests.forEach(tMeta => {
+      const resultsForTest: any[] = [];
+      comparisonGridData.students.forEach(student => {
+        const res = student.testResults[tMeta.testId];
+        if (res && !res.isAbsent) {
+          resultsForTest.push(res);
+        }
+      });
+
+      const getStatsForSubject = (subj: 'Physics' | 'Chemistry' | 'Botany' | 'Zoology' | 'Math') => {
+        const scores = resultsForTest
+          .map(r => getSubjectScore(r, subj))
+          .filter((v): v is number => typeof v === 'number');
+
+        if (scores.length === 0) return { max: '—', avg: '—' };
+        const maxVal = Math.max(...scores);
+        const avgVal = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+        return { max: maxVal, avg: avgVal };
+      };
+
+      const getStatsForTotal = () => {
+        const totalScores = resultsForTest
+          .map(r => r.score)
+          .filter((v): v is number => typeof v === 'number');
+
+        if (totalScores.length === 0) return { max: '—', avg: '—' };
+        const maxVal = Math.max(...totalScores);
+        const avgVal = Math.round(totalScores.reduce((a, b) => a + b, 0) / totalScores.length);
+        return { max: maxVal, avg: avgVal };
+      };
+
+      statsMap[tMeta.testId] = {
+        Physics: getStatsForSubject('Physics'),
+        Chemistry: getStatsForSubject('Chemistry'),
+        Botany: getStatsForSubject('Botany'),
+        Zoology: getStatsForSubject('Zoology'),
+        Math: getStatsForSubject('Math'),
+        Total: getStatsForTotal()
+      };
+    });
+
+    return statsMap;
+  }, [displayedTests, comparisonGridData.students]);
 
   // Derived filter options
   const filterOptions = useMemo(() => {
@@ -5091,27 +5282,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             </div>
           ) : (
             <div className="space-y-4">
-              {/* Alert diagnostic summary banner */}
-              <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3 print:hidden">
-                <Activity size={18} className="text-blue-600 shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <p className="text-xs font-black text-slate-900 uppercase tracking-wider font-mono">
-                    Grid Active: Consolidated {displayedTests.length} Tests for {comparisonGridData.students.length} Students
-                  </p>
-                  <p className="text-[11px] text-slate-500 font-medium font-sans">
-                    Horizontal alignments are built chronologically (newest to oldest). Subjects adjust dynamically between <strong>JEE (Math)</strong> & <strong>NEET (Botany & Zoology)</strong> depending on the program context.
-                  </p>
-                </div>
-              </div>
-
               {/* Spreadsheet Grid container */}
               <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden">
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto overflow-y-auto max-h-[750px] relative">
                   <table className="w-full border-collapse text-xs text-left">
                     <thead>
-                      {/* First Row Header Groups */}
-                      <tr className="bg-slate-950 text-white border-b border-slate-850">
-                        <th rowSpan={2} className="px-6 py-5 border-r-2 border-r-slate-800 align-middle min-w-[260px] sticky left-0 bg-slate-950 z-20 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
+                       {/* First Row Header Groups */}
+                      <tr className="bg-slate-950 text-white border-b border-slate-850 sticky top-0 z-30">
+                        <th rowSpan={2} className="px-6 py-5 border-r-2 border-r-slate-800 align-middle min-w-[260px] sticky left-0 top-0 bg-slate-950 z-40 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
                           <div className="text-xs font-black uppercase tracking-widest font-mono text-blue-400">Student Profile</div>
                           <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Roll-No / Program Batch</div>
                         </th>
@@ -5122,7 +5300,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               key={testMeta.testId} 
                               colSpan={isMedicalProgram ? 6 : 5} 
                               className={cn(
-                                "px-4 py-3 text-center border-r-2 border-r-slate-800 font-extrabold tracking-widest uppercase text-[10px] font-mono",
+                                "px-4 py-3 text-center border-r-2 border-r-slate-800 font-extrabold tracking-widest uppercase text-[10px] font-mono sticky top-0 z-30",
                                 idx === 0 ? "bg-blue-950 text-blue-200" : "bg-slate-900 text-slate-300"
                               )}
                             >
@@ -5141,21 +5319,98 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                       </tr>
 
                       {/* Second Row Header Sub-columns */}
-                      <tr className="bg-slate-800 text-slate-200 border-b border-slate-700 font-bold uppercase tracking-wider text-[9px] font-mono">
+                      <tr className="bg-slate-800 text-slate-200 border-b border-slate-700 font-bold uppercase tracking-wider text-[9px] font-mono sticky top-[64px] z-30">
                         {displayedTests.map((testMeta) => (
                           <React.Fragment key={testMeta.testId}>
-                            <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Physics</th>
-                            <th className="p-3 text-center border-r border-slate-700 w-16 text-slate-300">Chemistry</th>
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[90px] text-slate-300 sticky top-[64px] bg-slate-800 z-30 font-bold">
+                              <div className="text-[10px] tracking-wider uppercase text-slate-100 font-black">Physics</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-bold normal-case select-none">
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-450 text-[7.5px] font-semibold uppercase">max:</span>
+                                  <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Physics?.max ?? '—'}</span>
+                                </div>
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-450 text-[7.5px] font-semibold uppercase">avg:</span>
+                                  <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Physics?.avg ?? '—'}</span>
+                                </div>
+                              </div>
+                            </th>
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[90px] text-slate-300 sticky top-[64px] bg-slate-800 z-30 font-bold">
+                              <div className="text-[10px] tracking-wider uppercase text-slate-100 font-black">Chemistry</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-bold normal-case select-none">
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-450 text-[7.5px] font-semibold uppercase">max:</span>
+                                  <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Chemistry?.max ?? '—'}</span>
+                                </div>
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-450 text-[7.5px] font-semibold uppercase">avg:</span>
+                                  <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Chemistry?.avg ?? '—'}</span>
+                                </div>
+                              </div>
+                            </th>
                             {isMedicalProgram ? (
                               <>
-                                <th className="p-3 text-center border-r border-slate-700 w-22 text-blue-300">Botany</th>
-                                <th className="p-3 text-center border-r border-slate-700 w-22 text-blue-300">Zoology</th>
+                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[90px] text-blue-300 sticky top-[64px] bg-slate-800 z-30 font-bold">
+                                  <div className="text-[10px] tracking-wider uppercase text-blue-200 font-black">Botany</div>
+                                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-bold normal-case select-none">
+                                    <div className="flex justify-between px-0.5">
+                                      <span className="text-blue-400/60 text-[7.5px] font-semibold uppercase">max:</span>
+                                      <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Botany?.max ?? '—'}</span>
+                                    </div>
+                                    <div className="flex justify-between px-0.5">
+                                      <span className="text-blue-400/60 text-[7.5px] font-semibold uppercase">avg:</span>
+                                      <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Botany?.avg ?? '—'}</span>
+                                    </div>
+                                  </div>
+                                </th>
+                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[90px] text-blue-300 sticky top-[64px] bg-slate-800 z-30 font-bold">
+                                  <div className="text-[10px] tracking-wider uppercase text-blue-200 font-black">Zoology</div>
+                                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-bold normal-case select-none">
+                                    <div className="flex justify-between px-0.5">
+                                      <span className="text-blue-400/60 text-[7.5px] font-semibold uppercase">max:</span>
+                                      <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Zoology?.max ?? '—'}</span>
+                                    </div>
+                                    <div className="flex justify-between px-0.5">
+                                      <span className="text-blue-400/60 text-[7.5px] font-semibold uppercase">avg:</span>
+                                      <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Zoology?.avg ?? '—'}</span>
+                                    </div>
+                                  </div>
+                                </th>
                               </>
                             ) : (
-                              <th className="p-3 text-center border-r border-slate-700 w-28 text-emerald-300">Mathematics</th>
+                              <th className="p-2.5 text-center border-r border-slate-700 min-w-[100px] text-emerald-300 sticky top-[64px] bg-slate-800 z-30 font-bold">
+                                <div className="text-[10px] tracking-wider uppercase text-emerald-200 font-black">Mathematics</div>
+                                <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-emerald-400/80 space-y-0.5 font-bold normal-case select-none">
+                                  <div className="flex justify-between px-0.5">
+                                    <span className="text-emerald-500/60 text-[7.5px] font-semibold uppercase">max:</span>
+                                    <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Math?.max ?? '—'}</span>
+                                  </div>
+                                  <div className="flex justify-between px-0.5">
+                                    <span className="text-emerald-500/60 text-[7.5px] font-semibold uppercase">avg:</span>
+                                    <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Math?.avg ?? '—'}</span>
+                                  </div>
+                                </div>
+                              </th>
                             )}
-                            <th className="p-3 text-center border-r border-slate-700 min-w-[95px] text-white">Cumulative Marks</th>
-                            <th className="p-3 text-center border-r-2 border-r-slate-800 w-14 text-amber-400 bg-slate-900/40">Rank</th>
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[110px] text-white sticky top-[64px] bg-slate-800 z-30 font-bold">
+                              <div className="text-[10px] tracking-wider uppercase text-slate-100 font-black">Cumulative Marks</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-300 space-y-0.5 font-bold normal-case select-none">
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-400 text-[7.5px] font-semibold uppercase">max:</span>
+                                  <span className="text-emerald-400 font-extrabold">{testWiseStats[testMeta.testId]?.Total?.max ?? '—'}</span>
+                                </div>
+                                <div className="flex justify-between px-0.5">
+                                  <span className="text-slate-400 text-[7.5px] font-semibold uppercase">avg:</span>
+                                  <span className="text-amber-400 font-extrabold">{testWiseStats[testMeta.testId]?.Total?.avg ?? '—'}</span>
+                                </div>
+                              </div>
+                            </th>
+                            <th className="p-2.5 text-center border-r-2 border-r-slate-800 min-w-[70px] text-amber-400 bg-slate-900/40 sticky top-[64px] z-30 font-bold">
+                              <div className="text-[10px] tracking-wider uppercase font-black">Rank</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8px] leading-tight text-slate-500 font-medium normal-case select-none text-center">
+                                Test Rank
+                              </div>
+                            </th>
                           </React.Fragment>
                         ))}
                       </tr>
