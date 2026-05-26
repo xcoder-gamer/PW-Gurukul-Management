@@ -144,7 +144,7 @@ import { BookOpen } from 'lucide-react';
 function HomeSelector() {
   const { role } = useAuth();
   const isAdmin = role === 'admin';
-  if (role === 'teacher' || role === 'center' || role === 'center_level') {
+  if (role === 'teacher' || role === 'center' || role === 'center_level' || role === 'central') {
     return <Navigate to="/students" />;
   }
   return <Home />;
@@ -175,7 +175,7 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/" element={<PrivateRoute><HomeSelector /></PrivateRoute>} />
             <Route path="/students" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher']}><Students /></RestrictedRoute></PrivateRoute>} />
-            <Route path="/tests" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher']}><Tests /></RestrictedRoute></PrivateRoute>} />
+            <Route path="/tests" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'center_level', 'center', 'teacher']}><Tests /></RestrictedRoute></PrivateRoute>} />
             <Route path="/results" element={<PrivateRoute><RestrictedRoute allow={['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher']}><Results /></RestrictedRoute></PrivateRoute>} />
             <Route path="/more" element={<PrivateRoute><AdminRoute><More /></AdminRoute></PrivateRoute>} />
             <Route path="/masters/qbg" element={<PrivateRoute><AdminRoute><QBG /></AdminRoute></PrivateRoute>} />

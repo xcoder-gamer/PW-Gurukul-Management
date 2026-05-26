@@ -25,19 +25,20 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const { logout, user, role } = useAuth();
   
   const navItems = [
-    { to: '/', icon: Home, label: 'Dashboard', allow: ['admin', 'operator', 'central_team', 'central'] },
+    { to: '/', icon: Home, label: 'Dashboard', allow: ['admin', 'operator', 'central_team'] },
     { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
-    { to: '/tests', icon: BookOpen, label: 'Test Series', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center'] },
+    { to: '/tests', icon: BookOpen, label: 'Test Series', allow: ['admin', 'operator', 'central_team', 'center_level', 'center'] },
     { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
-    { to: '/masters/qbg', icon: Database, label: 'QBG Master', allow: ['admin', 'operator', 'central'] },
-    { to: '/logs', icon: LayoutDashboard, label: 'Audit Logs', allow: ['admin', 'operator', 'central'] },
-    { to: '/more', icon: MoreHorizontal, label: 'Settings', allow: ['admin', 'operator', 'central'] },
+    { to: '/masters/qbg', icon: Database, label: 'QBG Master', allow: ['admin', 'operator'] },
+    { to: '/logs', icon: LayoutDashboard, label: 'Audit Logs', allow: ['admin', 'operator'] },
+    { to: '/more', icon: MoreHorizontal, label: 'Settings', allow: ['admin', 'operator'] },
   ].filter(item => !role || item.allow.includes(role));
 
   const roleLabel = () => {
     switch(role) {
       case 'admin': return 'Administrator';
       case 'central_team': return 'Central Team';
+      case 'central': return 'Central';
       case 'center_level': return 'Center Admin';
       case 'teacher': return 'Academic Mentor';
       case 'operator': return 'Operator';
