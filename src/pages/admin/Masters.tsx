@@ -692,12 +692,31 @@ export default function Masters() {
 
               <div className="space-y-1 flex-1">
                 <p className="font-black text-slate-800 break-all">
-                  {item.programName || item.centerName || item.batchName || item.teacherName || item.name || item.subject || 'Item'}
+                  {type === 'user_roles' ? item.email : (item.programName || item.centerName || item.batchName || item.teacherName || item.name || item.subject || 'Item')}
                 </p>
-                <div className="flex items-center space-x-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Badge variant={item.isActive ? 'green' : 'slate'}>
                     {item.isActive ? 'Active' : 'Inactive'}
                   </Badge>
+                  {type === 'user_roles' && item.role && (
+                    <Badge variant={
+                      item.role === 'admin' ? 'blue' :
+                      item.role === 'central' ? 'amber' :
+                      item.role === 'center' ? 'green' : 'slate'
+                    }>
+                      {item.role}
+                    </Badge>
+                  )}
+                  {type === 'user_roles' && item.centerId && (
+                    <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg">
+                      Center: {item.centerId === 'all' ? 'All' : item.centerId}
+                    </span>
+                  )}
+                  {type === 'user_roles' && item.batchIds && item.role === 'teacher' && (
+                    <span className="text-[10px] font-bold text-emerald-605 bg-emerald-50 px-2 py-0.5 rounded-lg max-w-[12rem] truncate">
+                      Batches: {item.batchIds === 'all' ? 'All' : item.batchIds}
+                    </span>
+                  )}
                   {item.regNo && <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.regNo}</span>}
                   {item.classLevel && <Badge variant="blue">{item.classLevel}</Badge>}
                   {item.examType && <Badge variant="slate">{item.examType}</Badge>}
@@ -818,53 +837,61 @@ export default function Masters() {
               </div>
 
               <form onSubmit={handleSave} className="space-y-4">
-                {config.fields.map((field) => (
-                  <div key={field.name} className="space-y-2">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">
-                      {field.label}
-                    </label>
-                    
-                    {field.type === 'select' ? (
-                      <Select 
-                        value={formData[field.name] || ''} 
-                        onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                        required
-                      >
-                        <option value="">Select Option</option>
-                        {(field as any).options?.map((opt: any) => <option key={opt} value={opt}>{opt}</option>)}
-                      </Select>
-                    ) : field.type === 'db-select' ? (
-                      <Select 
-                        value={formData[field.name] || ''} 
-                        onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                        required
-                      >
-                        <option value="">Select From DB</option>
-                        {dbOptions[(field as any).collection]?.filter(opt => opt.isActive || opt.id === formData[field.name]).map(opt => (
-                          <option key={opt.id} value={opt.id}>{opt[(field as any).displayField]}</option>
-                        ))}
-                      </Select>
-                    ) : field.type === 'checkbox' ? (
-                      <div className="flex items-center space-x-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                        <input 
-                          type="checkbox" 
-                          className="w-6 h-6 rounded-lg text-blue-600 focus:ring-blue-500 border-slate-200"
-                          checked={formData[field.name] ?? true}
-                          onChange={e => setFormData({ ...formData, [field.name]: e.target.checked })}
+                {type === 'user_roles' ? (
+                  <UserRolesFormFields 
+                    formData={formData} 
+                    setFormData={setFormData} 
+                    dbOptions={dbOptions} 
+                  />
+                ) : (
+                  config.fields.map((field) => (
+                    <div key={field.name} className="space-y-2">
+                      <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">
+                        {field.label}
+                      </label>
+                      
+                      {field.type === 'select' ? (
+                        <Select 
+                          value={formData[field.name] || ''} 
+                          onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                          required
+                        >
+                          <option value="">Select Option</option>
+                          {(field as any).options?.map((opt: any) => <option key={opt} value={opt}>{opt}</option>)}
+                        </Select>
+                      ) : field.type === 'db-select' ? (
+                        <Select 
+                          value={formData[field.name] || ''} 
+                          onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                          required
+                        >
+                          <option value="">Select From DB</option>
+                          {dbOptions[(field as any).collection]?.filter(opt => opt.isActive || opt.id === formData[field.name]).map(opt => (
+                            <option key={opt.id} value={opt.id}>{opt[(field as any).displayField]}</option>
+                          ))}
+                        </Select>
+                      ) : field.type === 'checkbox' ? (
+                        <div className="flex items-center space-x-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                          <input 
+                            type="checkbox" 
+                            className="w-6 h-6 rounded-lg text-blue-600 focus:ring-blue-500 border-slate-200"
+                            checked={formData[field.name] ?? true}
+                            onChange={e => setFormData({ ...formData, [field.name]: e.target.checked })}
+                          />
+                          <span className="font-bold text-slate-700">Set as Active</span>
+                        </div>
+                      ) : (
+                        <Input 
+                          placeholder={(field as any).placeholder || field.label} 
+                          type={field.type}
+                          value={formData[field.name] || ''}
+                          onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
+                          required
                         />
-                        <span className="font-bold text-slate-700">Set as Active</span>
-                      </div>
-                    ) : (
-                      <Input 
-                        placeholder={(field as any).placeholder || field.label} 
-                        type={field.type}
-                        value={formData[field.name] || ''}
-                        onChange={e => setFormData({ ...formData, [field.name]: e.target.value })}
-                        required
-                      />
-                    )}
-                  </div>
-                ))}
+                      )}
+                    </div>
+                  ))
+                )}
 
                 <div className="pt-4 flex space-x-3">
                   <Button type="button" variant="secondary" onClick={() => setShowAddModal(false)} className="flex-1">
@@ -930,6 +957,305 @@ export default function Masters() {
           </div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function UserRolesFormFields({ formData, setFormData, dbOptions }: { formData: any; setFormData: any; dbOptions: any }) {
+  const centers = dbOptions['centers'] || [];
+  const batches = dbOptions['batches'] || [];
+
+  const handleRoleChange = (role: string) => {
+    if (role === 'admin' || role === 'central') {
+      setFormData({
+        ...formData,
+        role,
+        centerId: 'all',
+        batchIds: 'all'
+      });
+    } else if (role === 'center') {
+      setFormData({
+        ...formData,
+        role,
+        centerId: '',
+        batchIds: 'all' // Center level users have batch assignment "all" by default
+      });
+    } else {
+      setFormData({
+        ...formData,
+        role,
+        centerId: '',
+        batchIds: ''
+      });
+    }
+  };
+
+  const handleCenterToggle = (centerIdVal: string) => {
+    if (centerIdVal === 'all') {
+      setFormData({
+        ...formData,
+        centerId: 'all'
+      });
+      return;
+    }
+
+    const currentCenters = formData.centerId || '';
+    if (currentCenters === 'all') {
+      setFormData({
+        ...formData,
+        centerId: centerIdVal
+      });
+      return;
+    }
+
+    const list = currentCenters.split(',').map((s: string) => s.trim()).filter(Boolean);
+    let newList;
+    if (list.includes(centerIdVal)) {
+      newList = list.filter((id: string) => id !== centerIdVal);
+    } else {
+      newList = [...list, centerIdVal];
+    }
+    setFormData({
+      ...formData,
+      centerId: newList.join(',')
+    });
+  };
+
+  const handleBatchToggle = (batchIdVal: string) => {
+    const currentBatches = formData.batchIds || '';
+    if (currentBatches === 'all') {
+      setFormData({
+        ...formData,
+        batchIds: batchIdVal
+      });
+      return;
+    }
+
+    const list = typeof currentBatches === 'string'
+      ? currentBatches.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : Array.isArray(currentBatches) ? currentBatches : [];
+    
+    let newList;
+    if (list.includes(batchIdVal)) {
+      newList = list.filter(id => id !== batchIdVal);
+    } else {
+      newList = [...list, batchIdVal];
+    }
+    setFormData({
+      ...formData,
+      batchIds: newList.join(',')
+    });
+  };
+
+  const selectedCenterList = formData.centerId === 'all' 
+    ? ['all'] 
+    : (formData.centerId || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+
+  const selectedBatchList = formData.batchIds === 'all'
+    ? ['all']
+    : (formData.batchIds || '').split(',').map((s: string) => s.trim()).filter(Boolean);
+
+  return (
+    <div className="space-y-4 text-left">
+      {/* User Email */}
+      <div className="space-y-1">
+        <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">
+          User Email
+        </label>
+        <Input 
+          type="email"
+          placeholder="e.g. staff.member@pw.live"
+          value={formData.email || ''}
+          onChange={e => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+      </div>
+
+      {/* Role */}
+      <div className="space-y-1">
+        <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">
+          Role
+        </label>
+        <Select 
+          value={formData.role || ''} 
+          onChange={e => handleRoleChange(e.target.value)}
+          required
+        >
+          <option value="">Select Role Option</option>
+          <option value="admin">admin</option>
+          <option value="central">central</option>
+          <option value="center">center</option>
+          <option value="teacher">teacher</option>
+        </Select>
+      </div>
+
+      {/* Dynamic Display for Admin/Central */}
+      {(formData.role === 'admin' || formData.role === 'central') && (
+        <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-2xl space-y-2">
+          <p className="text-xs font-bold text-emerald-800 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+            Complete Access Enabled
+          </p>
+          <p className="text-[11px] text-emerald-600/80 leading-normal">
+            Admin & Central users automatically have access to <strong>all centers</strong> and <strong>all batches</strong>. No Selective assignment is required.
+          </p>
+        </div>
+      )}
+
+      {/* Assign Center - Shown for Center level user or Teacher */}
+      {(formData.role === 'center' || formData.role === 'teacher') && (
+        <div className="space-y-2">
+          <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 flex justify-between items-center">
+            <span>Assign Centers</span>
+            <span className="text-[10px] text-slate-400 font-bold lowercase">
+              {formData.role === 'center' ? '(supports multiple / all selection)' : '(single center selection)'}
+            </span>
+          </label>
+          
+          <div className="border border-slate-100 rounded-2xl bg-slate-50/50 p-2.5 max-h-48 overflow-y-auto space-y-1.5 list-none">
+            {/* "All Centers" button/checkbox option (Shown only if role is 'center') */}
+            {formData.role === 'center' && (
+              <div 
+                onClick={() => handleCenterToggle('all')}
+                className={cn(
+                  "flex items-center justify-between p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all",
+                  selectedCenterList.includes('all') 
+                    ? "bg-blue-50 border-blue-200 text-blue-700 shadow-sm" 
+                    : "bg-white border-slate-100 text-slate-600 hover:border-slate-200"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "w-3.5 h-3.5 rounded border flex items-center justify-center text-[8px]",
+                    selectedCenterList.includes('all') ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white"
+                  )}>
+                    {selectedCenterList.includes('all') && "✓"}
+                  </div>
+                  <span>All Centers (Universal Access)</span>
+                </div>
+                <Badge variant="blue">all</Badge>
+              </div>
+            )}
+
+            {/* Individual Centers */}
+            {centers.map((c: any) => {
+              const isSelected = selectedCenterList.includes(c.id) || selectedCenterList.includes('all');
+              const isClickable = !selectedCenterList.includes('all') || formData.role === 'teacher';
+              return (
+                <div 
+                  key={c.id}
+                  onClick={() => {
+                    if (formData.role === 'teacher') {
+                      setFormData({
+                        ...formData,
+                        centerId: c.id
+                      });
+                    } else if (isClickable) {
+                      handleCenterToggle(c.id);
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center justify-between p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all",
+                    selectedCenterList.includes('all') && formData.role === 'center'
+                      ? "bg-blue-50/40 border-blue-100/40 text-blue-400 cursor-not-allowed"
+                      : isSelected && (formData.role === 'teacher' ? formData.centerId === c.id : true)
+                        ? "bg-blue-50 border-blue-200 text-blue-700 shadow-sm"
+                        : "bg-white border-slate-100 text-slate-600 hover:border-slate-200"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-3.5 h-3.5 rounded border flex items-center justify-center text-[8px]",
+                      isSelected && (formData.role === 'teacher' ? formData.centerId === c.id : true) ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white"
+                    )}>
+                      {isSelected && (formData.role === 'teacher' ? formData.centerId === c.id : true) && "✓"}
+                    </div>
+                    <span>{c.centerName}</span>
+                  </div>
+                  <span className="text-[9px] font-mono text-slate-400">ID: {c.id.slice(-6)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Assign Batches - Shown for Teacher */}
+      {formData.role === 'teacher' && (
+        <div className="space-y-2">
+          <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1">
+            Assign Batches
+          </label>
+          <div className="border border-slate-100 rounded-2xl bg-slate-50/50 p-2.5 max-h-48 overflow-y-auto space-y-1.5 list-none">
+            
+            {/* "All Batches" option */}
+            <div 
+              onClick={() => handleBatchToggle('all')}
+              className={cn(
+                "flex items-center justify-between p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all",
+                selectedBatchList.includes('all') 
+                  ? "bg-blue-50 border-blue-200 text-blue-700 shadow-sm" 
+                  : "bg-white border-slate-100 text-slate-600 hover:border-slate-200"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <div className={cn(
+                  "w-3.5 h-3.5 rounded border flex items-center justify-center text-[8px]",
+                  selectedBatchList.includes('all') ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white"
+                )}>
+                  {selectedBatchList.includes('all') && "✓"}
+                </div>
+                <span>All Batches (Full Classes)</span>
+              </div>
+              <Badge variant="blue">all</Badge>
+            </div>
+
+            {/* Individual active batches */}
+            {batches
+              .filter((b: any) => !formData.centerId || b.centerId === formData.centerId)
+              .map((b: any) => {
+                const isSelected = selectedBatchList.includes(b.id) || selectedBatchList.includes('all');
+                const isClickable = !selectedBatchList.includes('all');
+                return (
+                  <div 
+                    key={b.id}
+                    onClick={() => isClickable && handleBatchToggle(b.id)}
+                    className={cn(
+                      "flex items-center justify-between p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all",
+                      selectedBatchList.includes('all')
+                        ? "bg-blue-50/40 border-blue-100/40 text-blue-400 cursor-not-allowed"
+                        : isSelected
+                          ? "bg-blue-50 border-blue-200 text-blue-700 shadow-sm"
+                          : "bg-white border-slate-100 text-slate-600 hover:border-slate-200"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-3.5 h-3.5 rounded border flex items-center justify-center text-[8px]",
+                        isSelected ? "bg-blue-600 border-blue-600 text-white" : "border-slate-300 bg-white"
+                      )}>
+                        {isSelected && "✓"}
+                      </div>
+                      <span>{b.batchName}</span>
+                    </div>
+                    <Badge variant="slate">{b.batchCode}</Badge>
+                  </div>
+                );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Set Active Status */}
+      <div className="flex items-center space-x-3 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+        <input 
+          type="checkbox" 
+          className="w-6 h-6 rounded-lg text-blue-600 focus:ring-blue-500 border-slate-200"
+          checked={formData.isActive ?? true}
+          onChange={e => setFormData({ ...formData, isActive: e.target.checked })}
+        />
+        <span className="font-bold text-slate-700 text-sm">Set as Active</span>
+      </div>
     </div>
   );
 }

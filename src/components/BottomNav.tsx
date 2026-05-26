@@ -10,11 +10,11 @@ export function BottomNav() {
   const { role } = useAuth();
 
   const navItems = [
-    { to: '/', icon: Home, label: 'Home', allow: ['admin', 'operator', 'central_team'] },
-    { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
-    { to: '/tests', icon: BookOpen, label: 'Tests', allow: ['admin', 'operator', 'central_team', 'center_level'] },
-    { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'center_level', 'teacher'] },
-    { to: '/more', icon: MoreHorizontal, label: 'More', allow: ['admin', 'operator'] },
+    { to: '/', icon: Home, label: 'Home', allow: ['admin', 'operator', 'central_team', 'central'] },
+    { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
+    { to: '/tests', icon: BookOpen, label: 'Tests', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center'] },
+    { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
+    { to: '/more', icon: MoreHorizontal, label: 'More', allow: ['admin', 'operator', 'central'] },
   ].filter(item => !role || item.allow.includes(role));
 
   return (

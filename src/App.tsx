@@ -43,6 +43,16 @@ import { ShieldAlert, LogOut } from 'lucide-react';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading, role, isQuotaExceeded } = useAuth();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = React.useState(() => {
+    return localStorage.getItem('sidebar_collapsed') === 'true';
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      localStorage.setItem('sidebar_collapsed', String(!prev));
+      return !prev;
+    });
+  };
   
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -55,8 +65,8 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   
   return (
     <div className="min-h-screen flex bg-[#F8FAFC] selection:bg-blue-100 uppercase-none">
-      <Sidebar />
-      <div className="flex-1 pb-24 md:pb-8 md:pl-64 overflow-x-hidden transition-all duration-300">
+      <Sidebar isCollapsed={isSidebarCollapsed} onToggle={toggleSidebar} />
+      <div className={`flex-1 pb-24 md:pb-8 overflow-x-hidden transition-all duration-300 ${isSidebarCollapsed ? 'md:pl-20' : 'md:pl-64'}`}>
         {isQuotaExceeded && (
           <div className="bg-amber-500 text-white font-black text-xs px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md sticky top-0 z-50">
             <div className="flex items-center gap-2.5">

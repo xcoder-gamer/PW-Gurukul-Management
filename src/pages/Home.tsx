@@ -10,7 +10,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 
 export default function Home() {
-  const { user, role } = useAuth();
+  const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const navigate = useNavigate();
   const [stats, setStats] = useState({
@@ -111,9 +111,26 @@ export default function Home() {
       try {
         setLoading(true);
         
+        const isCenterUser = role === 'center' || role === 'center_level';
+        const allowedCenters = (isCenterUser && centerId && centerId !== 'all') 
+          ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) 
+          : [];
+
+        let currentCenterFilter = filters.centerIds;
+        if (allowedCenters.length > 0) {
+          if (currentCenterFilter.length > 0) {
+            currentCenterFilter = currentCenterFilter.filter(id => allowedCenters.includes(id));
+            if (currentCenterFilter.length === 0) {
+              currentCenterFilter = allowedCenters;
+            }
+          } else {
+            currentCenterFilter = allowedCenters;
+          }
+        }
+
         let studentQuery = query(collection(db, 'students'));
         if (filters.programIds.length > 0) studentQuery = query(studentQuery, where('programId', 'in', filters.programIds));
-        if (filters.centerIds.length > 0) studentQuery = query(studentQuery, where('centerId', 'in', filters.centerIds));
+        if (currentCenterFilter.length > 0) studentQuery = query(studentQuery, where('centerId', 'in', currentCenterFilter));
         if (filters.batchIds.length > 0) studentQuery = query(studentQuery, where('batchId', 'in', filters.batchIds));
 
         let testQuery = query(collection(db, 'tests'));
@@ -128,7 +145,7 @@ export default function Home() {
         let resultQuery = query(collection(db, 'result_updated'));
         if (filters.programIds.length > 0) resultQuery = query(resultQuery, where('programId', 'in', filters.programIds));
         if (filters.batchIds.length > 0) resultQuery = query(resultQuery, where('batchId', 'in', filters.batchIds));
-        if (filters.centerIds.length > 0) resultQuery = query(resultQuery, where('centerId', 'in', filters.centerIds));
+        if (currentCenterFilter.length > 0) resultQuery = query(resultQuery, where('centerId', 'in', currentCenterFilter));
 
         // Aggregate counts: 100% server-side optimized counts
         // Accuracy limits: We fetch a strong sample of latest 200 results to calculate representative avg. accuracy

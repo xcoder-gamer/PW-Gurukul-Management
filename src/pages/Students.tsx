@@ -95,8 +95,10 @@ export default function Students() {
 
   useEffect(() => {
     if (role === 'center' || role === 'center_level' || role === 'center') {
-      if (centerId && filters.center !== centerId) {
-        setFilters(f => ({ ...f, center: centerId }));
+      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
+        if (filters.center !== centerId) {
+          setFilters(f => ({ ...f, center: centerId }));
+        }
       }
     } else if (role === 'teacher') {
       if (batchIds && batchIds.length > 0) {
@@ -169,11 +171,21 @@ export default function Students() {
 
     try {
       let q;
-      if (role === 'center' || role === 'center_level' || role === 'center') {
-        if (filters.batch) {
-          q = query(collection(db, 'students'), where('centerId', '==', centerId), where('batchId', '==', filters.batch));
+      if ((role === 'center' || role === 'center_level' || role === 'center') && centerId !== 'all') {
+        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+        if (allowedCenters.length > 1) {
+          if (filters.batch) {
+            q = query(collection(db, 'students'), where('centerId', 'in', allowedCenters), where('batchId', '==', filters.batch));
+          } else {
+            q = query(collection(db, 'students'), where('centerId', 'in', allowedCenters), limit(1500));
+          }
         } else {
-          q = query(collection(db, 'students'), where('centerId', '==', centerId), limit(1500));
+          const singleCenter = allowedCenters[0] || '';
+          if (filters.batch) {
+            q = query(collection(db, 'students'), where('centerId', '==', singleCenter), where('batchId', '==', filters.batch));
+          } else {
+            q = query(collection(db, 'students'), where('centerId', '==', singleCenter), limit(1500));
+          }
         }
       } else if (role === 'teacher') {
         const activeBatch = filters.batch || (batchIds && batchIds.length > 0 ? batchIds[0] : null);
@@ -417,8 +429,11 @@ export default function Students() {
   const filteredStudents = React.useMemo(() => {
     return students.filter(s => {
       // Security role filters:
-      if ((role === 'center' || role === 'center_level' || role === 'center') && s.centerId !== centerId) {
-        return false;
+      if ((role === 'center' || role === 'center_level' || role === 'center') && centerId !== 'all') {
+        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+        if (!allowedCenters.includes(s.centerId)) {
+          return false;
+        }
       }
       if (role === 'teacher' && (!batchIds || !batchIds.includes(s.batchId))) {
         return false;

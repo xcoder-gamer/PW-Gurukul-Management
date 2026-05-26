@@ -542,8 +542,10 @@ export default function Results() {
 
   useEffect(() => {
     if (role === 'center' || role === 'center_level') {
-      if (centerId && filters.centerId !== centerId) {
-        setFilters(f => ({ ...f, centerId }));
+      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
+        if (filters.centerId !== centerId) {
+          setFilters(f => ({ ...f, centerId }));
+        }
       }
     } else if (role === 'teacher') {
       if (batchIds && batchIds.length > 0) {
@@ -594,8 +596,11 @@ export default function Results() {
           : res.difficultyStats
       };
     }).filter(r => {
-      if ((role === 'center' || role === 'center_level') && r.centerId !== centerId) {
-        return false;
+      if ((role === 'center' || role === 'center_level') && centerId !== 'all') {
+        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+        if (!allowedCenters.includes(r.centerId)) {
+          return false;
+        }
       }
       if (role === 'teacher' && (!batchIds || !batchIds.includes(r.batchId))) {
         return false;
@@ -683,8 +688,43 @@ export default function Results() {
       return (b.score || 0) - (a.score || 0);
     });
     
-    // Add ranks dynamically if multiple tests or filters active
-    const ranked = sorted.map((r, i) => ({ ...r, rank: i + 1 }));
+    // Calculate standard competition ranks per testId
+    const testGroups: Record<string, any[]> = {};
+    filtered.forEach((r: any) => {
+      if (!testGroups[r.testId]) {
+        testGroups[r.testId] = [];
+      }
+      testGroups[r.testId].push(r);
+    });
+
+    const rankMap: Record<string, number> = {};
+    Object.entries(testGroups).forEach(([tId, group]) => {
+      // Sort group by score descending, putting absent students at the bottom
+      const sortedGroup = [...group].sort((a: any, b: any) => {
+        if (a.isAbsent && !b.isAbsent) return 1;
+        if (!a.isAbsent && b.isAbsent) return -1;
+        return (b.score || 0) - (a.score || 0);
+      });
+
+      let currentRank = 1;
+      sortedGroup.forEach((r: any, idx: number) => {
+        if (r.isAbsent) {
+          rankMap[r.id] = idx + 1; // Fallback sequential rank
+          return;
+        }
+        if (idx === 0) {
+          currentRank = 1;
+        } else {
+          const prevRes = sortedGroup[idx - 1];
+          if (r.score !== prevRes.score) {
+            currentRank = idx + 1;
+          }
+        }
+        rankMap[r.id] = currentRank;
+      });
+    });
+
+    const ranked = sorted.map((r: any) => ({ ...r, rank: rankMap[r.id] || 1 }));
 
     if (filters.topOnly) {
       return ranked.slice(0, 10);
@@ -1304,34 +1344,7 @@ export default function Results() {
     document.body.removeChild(link);
   };
 
-  if (view === 'analytics' && selectedTestIds.length > 0) {
-    return (
-      <GlobalAnalytics 
-        results={results} 
-        tests={tests} 
-        onBack={() => setView('table')} 
-        selectedTestIds={selectedTestIds}
-        initialSearch={searchTerm}
-        onTestToggle={handleTestToggle}
-        onSelectAllTests={(allIds) => {
-          setSelectedTestIds(allIds);
-          fetchResults(allIds);
-        }}
-        onSelectResult={(res) => {
-          setSelectedResult(res);
-          setDetailBackView('analytics');
-          setAutoPrintDetail(false);
-          setView('detail');
-        }}
-        onPrintResult={(res) => {
-          setSelectedResult(res);
-          setDetailBackView('analytics');
-          setAutoPrintDetail(true);
-          setView('detail');
-        }}
-      />
-    );
-  }
+
 
   if (view === 'detail' && selectedResult) {
     return (
@@ -1349,147 +1362,195 @@ export default function Results() {
       {(loading || isReevaluating) && (
         <Loader fullScreen label={isReevaluating ? "Recalculating Scores..." : "Loading Data..."} />
       )}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-1">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Performance</p>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight">Results & Analytics</h1>
-          <p className="text-slate-500 font-medium text-sm">
-            View detailed rankings, accuracy reports and student performance metrics.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative group min-w-[280px]">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={16} />
-            <input 
-              type="text"
-              placeholder="Search by Student Name or Reg No..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-white border border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-sm font-bold focus:ring-4 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all"
-            />
-            {searchTerm && (
-              <button 
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-4 border-b border-slate-100">
+        <div className="space-y-4">
+          {/* Segmented View Switcher Tabs */}
+          {(role === 'admin' || role === 'central' || role === 'center' || role === 'teacher' || role === 'central_team') && (
+            <div className="flex bg-slate-100 p-1.5 rounded-2xl w-fit">
+              <button
+                onClick={() => setView('table')}
+                className={cn(
+                  "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
+                  view === 'table' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                )}
               >
-                <X size={16} />
+                Select Test (Table)
               </button>
-            )}
+              <button
+                onClick={() => {
+                  if (selectedTestIds.length === 0) {
+                    const allIds = tests.map(t => t.id);
+                    setSelectedTestIds(allIds);
+                    fetchResults(allIds);
+                  }
+                  setView('analytics');
+                }}
+                className={cn(
+                  "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
+                  view === 'analytics' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                Global Analysis
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] pl-0.5">Performance</p>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight">Results & Analytics</h1>
+            <p className="text-slate-500 font-medium text-sm">
+              {view === 'analytics' 
+                ? 'Comparative analytics and standard deviation dashboard across multiple test series.' 
+                : 'View detailed rankings, accuracy reports and student performance metrics.'}
+            </p>
           </div>
-          <Button variant="outline" size="md" onClick={handleExportCSV} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
-            <Download size={18} className="mr-2 text-emerald-600" />
-            Export CSV
-          </Button>
-
-          {canEdit && selectedResultIds.length > 0 && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={deleteSelectedResults} 
-              disabled={isDeleting}
-              className="border-rose-200 text-rose-600 hover:bg-rose-50"
-            >
-              <Trash2 className="mr-2 text-rose-600" size={18} />
-              Delete Selected ({selectedResultIds.length})
-            </Button>
-          )}
-
-          {isAdmin && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={() => {
-                if (selectedTestIds.length === 0) {
-                  const allIds = tests.map(t => t.id);
-                  setSelectedTestIds(allIds);
-                  fetchResults(allIds);
-                }
-                setView('analytics');
-              }} 
-              className={cn("border-slate-200", view === 'analytics' && "bg-blue-50 border-blue-200")}
-            >
-              <BarChart3 size={18} className="mr-2 text-indigo-600" />
-              Global Analysis
-            </Button>
-          )}
-          {isAdmin && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={() => setIsAdvancedFilterOpen(true)} 
-              className={cn("border-slate-200", (filters.minAccuracy > 0 || filters.minMathAccuracy > 0 || filters.topOnly) && "border-blue-300 bg-blue-50")}
-            >
-              <Filter size={18} className="mr-2 text-blue-600" />
-              Advanced Filter
-            </Button>
-          )}
-          {canEdit && (
-            <Button variant="primary" size="md" onClick={() => {
-              if (selectedTestIds.length === 0) {
-                toast.error('Please select a test first');
-                return;
-              }
-              setShowManualEntry(true);
-              setEditingResultId(null);
-              setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {}, type: '', rankTarget: '', targetYear: '' });
-            }} className="bg-blue-600 shadow-lg shadow-blue-100">
-              <Plus size={18} className="mr-2" />
-              Add Result
-            </Button>
-          )}
-          {canEdit && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={handleSyncGlobalMetadata} 
-              disabled={isSyncingGlobal}
-              className="border-blue-100 text-blue-600 hover:bg-blue-50"
-            >
-              <RefreshCw size={18} className={cn("mr-2", isSyncingGlobal && "animate-spin")} />
-              Sync Metadata
-            </Button>
-          )}
-          {canEdit && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={handleReevaluateResults} 
-              disabled={isReevaluating}
-              className="border-amber-100 text-amber-600 hover:bg-amber-50"
-            >
-              <RefreshCw size={18} className={cn("mr-2", isReevaluating && "animate-spin")} />
-              {isReevaluating ? 'Evaluating...' : selectedTestIds.length > 0 ? 'Re-evaluate Selected' : 'Re-evaluate All Results'}
-            </Button>
-          )}
-          {canEdit && (
-            <Button variant="outline" size="md" onClick={() => setIsBulkUploadOpen(true)} className="border-slate-200">
-              <Upload size={18} className="mr-2 text-purple-600" />
-              Bulk OMR
-            </Button>
-          )}
-          {canEdit && (
-            <Button 
-              variant="outline" 
-              size="md" 
-              onClick={handleDeleteOrphanedResults}
-              className="border-rose-100 text-rose-600 hover:bg-rose-50"
-            >
-              <Trash2 size={18} className="mr-2 text-rose-500" />
-              Clean Orphans
-            </Button>
-          )}
-          <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl px-6">
-            <Filter size={18} className="mr-2" />
-            {selectedTestIds.length === 1 
-              ? tests.find(t => t.id === selectedTestIds[0])?.name 
-              : selectedTestIds.length > 1 
-                ? `${selectedTestIds.length} Tests Selected`
-                : 'Select Test'}
-          </Button>
         </div>
+
+        {view === 'table' && (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative group min-w-[280px]">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={16} />
+              <input 
+                type="text"
+                placeholder="Search by Student Name or Reg No..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-white border border-slate-100 rounded-2xl pl-11 pr-4 py-2.5 text-sm font-bold focus:ring-4 focus:ring-blue-100 focus:border-blue-300 outline-none transition-all"
+              />
+              {searchTerm && (
+                <button 
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+            <Button variant="outline" size="md" onClick={handleExportCSV} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
+              <Download size={18} className="mr-2 text-emerald-600" />
+              Export CSV
+            </Button>
+
+            {canEdit && selectedResultIds.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={deleteSelectedResults} 
+                disabled={isDeleting}
+                className="border-rose-200 text-rose-600 hover:bg-rose-50"
+              >
+                <Trash2 className="mr-2 text-rose-600" size={18} />
+                Delete Selected ({selectedResultIds.length})
+              </Button>
+            )}
+
+            {(role === 'admin' || role === 'central' || role === 'center' || role === 'teacher') && (
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={() => setIsAdvancedFilterOpen(true)} 
+                className={cn("border-slate-200", (filters.minAccuracy > 0 || filters.minMathAccuracy > 0 || filters.topOnly) && "border-blue-300 bg-blue-50")}
+              >
+                <Filter size={18} className="mr-2 text-blue-600" />
+                Advanced Filter
+              </Button>
+            )}
+            {canEdit && (
+              <Button variant="primary" size="md" onClick={() => {
+                if (selectedTestIds.length === 0) {
+                  toast.error('Please select a test first');
+                  return;
+                }
+                setShowManualEntry(true);
+                setEditingResultId(null);
+                setManualData({ regNo: '', name: '', phone: '', email: '', testMode: 'offline', isAbsent: false, studentAnswers: {}, type: '', rankTarget: '', targetYear: '' });
+              }} className="bg-blue-600 shadow-lg shadow-blue-100">
+                <Plus size={18} className="mr-2" />
+                Add Result
+              </Button>
+            )}
+            {canEdit && (
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={handleSyncGlobalMetadata} 
+                disabled={isSyncingGlobal}
+                className="border-blue-100 text-blue-600 hover:bg-blue-50"
+              >
+                <RefreshCw size={18} className={cn("mr-2", isSyncingGlobal && "animate-spin")} />
+                Sync Metadata
+              </Button>
+            )}
+            {canEdit && (
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={handleReevaluateResults} 
+                disabled={isReevaluating}
+                className="border-amber-100 text-amber-600 hover:bg-amber-50"
+              >
+                <RefreshCw size={18} className={cn("mr-2", isReevaluating && "animate-spin")} />
+                {isReevaluating ? 'Evaluating...' : selectedTestIds.length > 0 ? 'Re-evaluate Selected' : 'Re-evaluate All Results'}
+              </Button>
+            )}
+            {canEdit && (
+              <Button variant="outline" size="md" onClick={() => setIsBulkUploadOpen(true)} className="border-slate-200">
+                <Upload size={18} className="mr-2 text-purple-600" />
+                Bulk OMR
+              </Button>
+            )}
+            {canEdit && (
+              <Button 
+                variant="outline" 
+                size="md" 
+                onClick={handleDeleteOrphanedResults}
+                className="border-rose-100 text-rose-600 hover:bg-rose-50"
+              >
+                <Trash2 size={18} className="mr-2 text-rose-500" />
+                Clean Orphans
+              </Button>
+            )}
+            <Button variant="secondary" size="md" onClick={() => setIsFilterOpen(true)} className="bg-white border border-slate-100 rounded-2xl px-6">
+              <Filter size={18} className="mr-2" />
+              {selectedTestIds.length === 1 
+                ? tests.find(t => t.id === selectedTestIds[0])?.name 
+                : selectedTestIds.length > 1 
+                  ? `${selectedTestIds.length} Tests Selected`
+                  : 'Select Test'}
+            </Button>
+          </div>
+        )}
       </header>
 
-      {selectedTestIds.length > 0 ? (() => {
+      {view === 'analytics' ? (
+        <GlobalAnalytics 
+          results={results} 
+          tests={tests} 
+          onBack={() => setView('table')} 
+          selectedTestIds={selectedTestIds}
+          initialSearch={searchTerm}
+          onTestToggle={handleTestToggle}
+          onSelectAllTests={(allIds) => {
+            setSelectedTestIds(allIds);
+            fetchResults(allIds);
+          }}
+          onSelectResult={(res) => {
+            setSelectedResult(res);
+            setDetailBackView('analytics');
+            setAutoPrintDetail(false);
+            setView('detail');
+          }}
+          onPrintResult={(res) => {
+            setSelectedResult(res);
+            setDetailBackView('analytics');
+            setAutoPrintDetail(true);
+            setView('detail');
+          }}
+          hideHeader={true}
+        />
+      ) : (
+        <>
+          {selectedTestIds.length > 0 ? (() => {
         const validResultsSummary = results.filter(r => !r.isAbsent);
         return (
           <Card className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white p-8 relative overflow-hidden shadow-xl shadow-blue-100">
@@ -1980,7 +2041,8 @@ export default function Results() {
            </div>
         </div>
       )}
-
+    </>
+  )}
       <BottomSheet isOpen={isFilterOpen} onClose={() => setIsFilterOpen(false)}>
         <div className="space-y-8">
           <div className="flex items-center justify-between">
@@ -2720,7 +2782,7 @@ export default function Results() {
   );
 }
 
-function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult, onPrintResult }: { 
+function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult, onPrintResult, hideHeader = true }: { 
   results: any[], 
   tests: any[], 
   onBack: () => void,
@@ -2729,7 +2791,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   onTestToggle?: (id: string) => void,
   onSelectAllTests?: (ids: string[]) => void,
   onSelectResult?: (res: any) => void,
-  onPrintResult?: (res: any) => void
+  onPrintResult?: (res: any) => void,
+  hideHeader?: boolean
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
@@ -3337,8 +3400,21 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         return (b.score || 0) - (a.score || 0);
       });
       const ranks: Record<string, number> = {};
+      let currentRank = 1;
       sorted.forEach((res, idx) => {
-        ranks[res.studentKey] = idx + 1; // 1-based index rank
+        if (res.isAbsent) {
+          ranks[res.studentKey] = idx + 1;
+          return;
+        }
+        if (idx === 0) {
+          currentRank = 1;
+        } else {
+          const prevRes = sorted[idx - 1];
+          if (res.score !== prevRes.score) {
+            currentRank = idx + 1;
+          }
+        }
+        ranks[res.studentKey] = currentRank;
       });
       testIdToStudentRanks[tId] = ranks;
     });
@@ -3609,22 +3685,34 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative">
+    <div className={cn(hideHeader ? "space-y-10 relative" : "max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative")}>
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-6">
-          <button onClick={onBack} className="p-3 bg-white rounded-2xl border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors">
-            <ChevronLeft size={24} strokeWidth={3} className="text-slate-900" />
-          </button>
-          <div className="space-y-1">
-            <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.3em] pl-0.5">Test Summary</p>
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">Global QBG Analysis</h2>
-            <p className="text-slate-500 font-medium text-sm">
-              {selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
-                ? tests.find(t => t.id === selectedTestIds[0])?.name 
-                : `${selectedTestIds.length} Tests Selected`} • {filteredResultsCount} Students
-            </p>
+        {!hideHeader ? (
+          <div className="flex items-center gap-6">
+            <button onClick={onBack} className="p-3 bg-white rounded-2xl border border-slate-100 shadow-sm hover:bg-slate-50 transition-colors">
+              <ChevronLeft size={24} strokeWidth={3} className="text-slate-900" />
+            </button>
+            <div className="space-y-1">
+              <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.3em] pl-0.5">Test Summary</p>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">Global QBG Analysis</h2>
+              <p className="text-slate-500 font-medium text-sm">
+                {selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
+                  ? tests.find(t => t.id === selectedTestIds[0])?.name 
+                  : `${selectedTestIds.length} Tests Selected`} • {filteredResultsCount} Students
+              </p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+             <div className="space-y-0.5">
+               <p className="text-sm text-slate-500 font-bold">
+                 Comparing: <span className="text-slate-900 font-black">{selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
+                   ? tests.find(t => t.id === selectedTestIds[0])?.name 
+                   : `${selectedTestIds.length} Test Series`}</span> • <span className="text-blue-600 font-black">{filteredResultsCount} Students</span>
+               </p>
+             </div>
+          </div>
+        )}
         
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" size="md" onClick={handleExportGlobal} className="border-slate-200">
