@@ -1553,7 +1553,7 @@ export default function Results() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative">
+    <div className="max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative">
       {(loading || isReevaluating) && (
         <Loader fullScreen label={isReevaluating ? "Recalculating Scores..." : "Loading Data..."} />
       )}
@@ -3876,7 +3876,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   };
 
   return (
-    <div className={cn(hideHeader ? "space-y-10 relative" : "max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative")}>
+    <div className={cn(hideHeader ? "space-y-10 relative" : "max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative")}>
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         {!hideHeader ? (
           <div className="flex items-center gap-6">
@@ -4377,47 +4377,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
       {activeAnalysisView === 'summary' && (
         <>
-          {Object.keys(aggregateStats.paperStats).length > 0 && (
-            <section className="space-y-6">
-              <h3 className="font-black text-xl text-slate-900 tracking-tight">Paper-wise Breakdown</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {Object.entries(aggregateStats.paperStats).map(([pName, pStats]: [string, any]) => {
-                  const accuracy = Math.round((pStats.totalCorrect / pStats.totalQuestions) * 100);
-                  const avgScore = (pStats.totalScore / results.length).toFixed(1);
-                  const maxPossible = (pStats.maxScore / results.length).toFixed(0);
 
-                  return (
-                    <Card key={pName} className="p-6 border-blue-100 bg-blue-50/20 rounded-[2rem] space-y-4">
-                      <div className="flex items-center justify-between">
-                        <Badge variant="blue" className="bg-blue-600 text-white border-none">{pName}</Badge>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">{pStats.totalQuestions} Questions</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="p-4 bg-white rounded-2xl border border-blue-50">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Avg Score</p>
-                          <div className="flex items-baseline gap-1">
-                            <span className="text-xl font-black text-slate-900">{avgScore}</span>
-                            <span className="text-[10px] font-bold text-slate-400">/ {maxPossible}</span>
-                          </div>
-                        </div>
-                        <div className="p-4 bg-white rounded-2xl border border-blue-50">
-                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Accuracy</p>
-                          <span className="text-xl font-black text-blue-600">{accuracy}%</span>
-                        </div>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <motion.div 
-                          className="h-full bg-blue-600" 
-                          initial={{ width: 0 }}
-                          animate={{ width: `${accuracy}%` }}
-                        />
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            </section>
-          )}
 
           <section className="space-y-6">
             <h3 className="font-black text-xl text-slate-900 tracking-tight">Difficulty Matrix</h3>
@@ -4530,9 +4490,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           <Card className="p-8 space-y-6 mb-20">
              <h3 className="text-xl font-black text-slate-900 tracking-tight">Topic-wise Summary</h3>
              <div className="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[60vh] hover-scrollbar no-scrollbar relative">
                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-50/50">
+                      <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                          <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
                             <th className="px-6 py-4">Topic</th>
                             <th className="px-6 py-4 text-center">Correct / Total</th>
@@ -4577,90 +4537,13 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         </>
       )}
 
-      {activeAnalysisView === 'topic' && (
-        <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto no-scrollbar">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50">
-                <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
-                  <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = topicSortConfig?.key === 'topic' && topicSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setTopicSortConfig({ key: 'topic', direction: dir });
-                    }}
-                  >
-                    Topic / Sub-Topic
-                  </th>
-                  <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = topicSortConfig?.key === 'totalAttempts' && topicSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setTopicSortConfig({ key: 'totalAttempts', direction: dir });
-                    }}
-                  >
-                    Total Attempts
-                  </th>
-                  <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = topicSortConfig?.key === 'totalCorrect' && topicSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setTopicSortConfig({ key: 'totalCorrect', direction: dir });
-                    }}
-                  >
-                    Correct
-                  </th>
-                  <th 
-                    className="px-6 py-5 text-right cursor-pointer hover:text-blue-600 transition-colors"
-                    onClick={() => {
-                      const dir = topicSortConfig?.key === 'accuracy' && topicSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setTopicSortConfig({ key: 'accuracy', direction: dir });
-                    }}
-                  >
-                    Accuracy
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {aggregateStats.topicTable.map((t: any) => (
-                  <tr key={`${t.topic}_${t.subTopic}`} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-5">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-black text-slate-900 group-hover:text-blue-600 transition-colors">{t.topic}</span>
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">{t.subTopic || 'General'}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 text-center font-black text-slate-400">{t.totalAttempts}</td>
-                    <td className="px-6 py-5 text-center">
-                       <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 font-black text-xs">
-                         {t.totalCorrect}
-                       </span>
-                    </td>
-                    <td className="px-6 py-5 text-right">
-                       <div className="flex flex-col items-end gap-1">
-                          <span className="text-sm font-black text-blue-600">{t.accuracy}%</span>
-                          <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                             <motion.div 
-                               className="h-full bg-blue-600"
-                               initial={{ width: 0 }}
-                               animate={{ width: `${t.accuracy}%` }}
-                             />
-                          </div>
-                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+
 
       {activeAnalysisView === 'student' && (
         <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto no-scrollbar">
+          <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
                   <th 
                     className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
@@ -4778,12 +4661,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
       {activeAnalysisView === 'question' && (
         <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto no-scrollbar">
+          <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-6 py-4 cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = sortConfig?.key === 'num' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setSortConfig({ key: 'num', direction: dir });
@@ -4792,7 +4675,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     Q.No {sortConfig?.key === 'num' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-6 py-4 cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = sortConfig?.key === 'subject' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setSortConfig({ key: 'subject', direction: dir });
@@ -4800,11 +4683,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   >
                     Subject {sortConfig?.key === 'subject' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5">Chapter Name</th>
-                  <th className="px-6 py-5">Topic</th>
+                  <th className="px-6 py-4">Chapter Name</th>
+                  <th className="px-6 py-4">Topic</th>
                   {visibleColumns.includes('correct') && (
                     <th 
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      className="px-6 py-4 text-center cursor-pointer hover:text-blue-600 transition-colors"
                       onClick={() => {
                         const dir = sortConfig?.key === 'correct' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setSortConfig({ key: 'correct', direction: dir });
@@ -4815,7 +4698,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   )}
                   {visibleColumns.includes('incorrect') && (
                     <th 
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      className="px-6 py-4 text-center cursor-pointer hover:text-blue-600 transition-colors"
                       onClick={() => {
                         const dir = sortConfig?.key === 'incorrect' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setSortConfig({ key: 'incorrect', direction: dir });
@@ -4826,7 +4709,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   )}
                   {visibleColumns.includes('unattempted') && (
                     <th 
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      className="px-6 py-4 text-center cursor-pointer hover:text-blue-600 transition-colors"
                       onClick={() => {
                         const dir = sortConfig?.key === 'unattempted' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setSortConfig({ key: 'unattempted', direction: dir });
@@ -4837,7 +4720,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   )}
                   {visibleColumns.includes('accuracy') && (
                     <th 
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                      className="px-6 py-4 text-center cursor-pointer hover:text-blue-600 transition-colors"
                       onClick={() => {
                         const dir = sortConfig?.key === 'accuracy' && sortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setSortConfig({ key: 'accuracy', direction: dir });
@@ -4856,25 +4739,25 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   
                   return (
                     <tr key={q.qIdx} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-2 text-xs font-black text-slate-800">Q.{q.qIdx}</td>
-                      <td className="px-4 py-2 font-black">
+                      <td className="px-6 py-3.5 text-xs font-black text-slate-800">Q.{q.qIdx}</td>
+                      <td className="px-6 py-3.5 font-black">
                         <Badge variant={q.subject === 'Physics' ? 'amber' : q.subject === 'Chemistry' ? 'blue' : 'green'} className="text-[7px] py-0 h-4">
                           {q.subject}
                         </Badge>
                       </td>
-                      <td className="px-4 py-2 text-xs font-bold text-slate-600 truncate max-w-[120px]">{q.chapter}</td>
-                      <td className="px-4 py-2 text-xs font-medium text-slate-500 truncate max-w-[120px]">{q.topic}</td>
+                      <td className="px-6 py-3.5 text-xs font-bold text-slate-600 truncate max-w-[400px]" title={q.chapter}>{q.chapter}</td>
+                      <td className="px-6 py-3.5 text-xs font-medium text-slate-500 truncate max-w-[400px]" title={q.topic}>{q.topic}</td>
                       {visibleColumns.includes('correct') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-emerald-600">{q.correct}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-emerald-600">{q.correct}</td>
                       )}
                       {visibleColumns.includes('incorrect') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-rose-500">{q.incorrect}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-rose-500">{q.incorrect}</td>
                       )}
                       {visibleColumns.includes('unattempted') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-slate-300">{q.unattempted}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-slate-300">{q.unattempted}</td>
                       )}
                       {visibleColumns.includes('accuracy') && (
-                        <td className="px-4 py-2 text-center">
+                        <td className="px-6 py-3.5 text-center">
                           <span className={cn("text-xs font-black", acc > 70 ? "text-emerald-600" : acc > 40 ? "text-amber-600" : "text-rose-600")}>
                             {acc}%
                           </span>
@@ -4891,26 +4774,26 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
       {activeAnalysisView === 'topic' && (
         <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-x-auto no-scrollbar">
+          <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">
-                  <th className="px-4 py-3">Subject</th>
-                  <th className="px-4 py-3">Chapter</th>
-                  <th className="px-4 py-3">Topic</th>
-                  <th className="px-4 py-3 text-center">Qus</th>
-                  <th className="px-4 py-3 text-center">Attm</th>
+                  <th className="px-6 py-4">Subject</th>
+                  <th className="px-6 py-4">Chapter</th>
+                  <th className="px-6 py-4">Topic</th>
+                  <th className="px-6 py-4 text-center">Qus</th>
+                  <th className="px-6 py-4 text-center">Attm</th>
                   {visibleColumns.includes('correct') && (
-                    <th className="px-4 py-3 text-center">Corr</th>
+                    <th className="px-6 py-4 text-center">Corr</th>
                   )}
                   {visibleColumns.includes('incorrect') && (
-                    <th className="px-4 py-3 text-center">Incorr</th>
+                    <th className="px-6 py-4 text-center">Incorr</th>
                   )}
                   {visibleColumns.includes('unattempted') && (
-                    <th className="px-4 py-3 text-center">Unattm</th>
+                    <th className="px-6 py-4 text-center">Unattm</th>
                   )}
                   {visibleColumns.includes('accuracy') && (
-                    <th className="px-4 py-3 text-center">Avg %</th>
+                    <th className="px-6 py-4 text-center">Avg %</th>
                   )}
                 </tr>
               </thead>
@@ -4920,26 +4803,26 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   
                   return (
                     <tr key={i} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-2">
+                      <td className="px-6 py-3.5">
                         <Badge variant={t.subject === 'Physics' ? 'amber' : t.subject === 'Chemistry' ? 'blue' : 'green'} className="text-[7px] py-0 h-3.5">
                           {t.subject}
                         </Badge>
                       </td>
-                      <td className="px-4 py-2 text-[11px] font-bold text-slate-600 truncate max-w-[120px]">{t.chapter}</td>
-                      <td className="px-4 py-2 text-[11px] font-medium text-slate-500 truncate max-w-[120px]">{t.topic}</td>
-                      <td className="px-4 py-2 text-center text-xs font-black text-slate-500">{t.questionsCount}</td>
-                      <td className="px-4 py-2 text-center text-xs font-bold text-slate-600">{t.correct + t.incorrect}</td>
+                      <td className="px-6 py-3.5 text-xs font-bold text-slate-600 truncate max-w-[400px]" title={t.chapter}>{t.chapter}</td>
+                      <td className="px-6 py-3.5 text-xs font-medium text-slate-500 truncate max-w-[400px]" title={t.topic}>{t.topic}</td>
+                      <td className="px-6 py-3.5 text-center text-xs font-black text-slate-500">{t.questionsCount}</td>
+                      <td className="px-6 py-3.5 text-center text-xs font-bold text-slate-600">{t.correct + t.incorrect}</td>
                       {visibleColumns.includes('correct') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-emerald-600">{t.correct}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-emerald-600">{t.correct}</td>
                       )}
                       {visibleColumns.includes('incorrect') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-rose-500">{t.incorrect}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-rose-500">{t.incorrect}</td>
                       )}
                       {visibleColumns.includes('unattempted') && (
-                        <td className="px-4 py-2 text-center text-xs font-black text-slate-300">{t.unattempted}</td>
+                        <td className="px-6 py-3.5 text-center text-xs font-black text-slate-300">{t.unattempted}</td>
                       )}
                       {visibleColumns.includes('accuracy') && (
-                        <td className="px-4 py-2 text-center">
+                        <td className="px-6 py-3.5 text-center">
                             <Badge className={cn(
                               "text-[9px] font-black py-0 h-4 min-w-[32px] flex items-center justify-center",
                               acc >= 80 ? "bg-emerald-100 text-emerald-700" :
@@ -6069,7 +5952,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 md:p-10 space-y-10 relative print:p-0 print:m-0 print:space-y-6">
+    <div className="max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative print:p-0 print:m-0 print:space-y-6">
       {/* Printable Scorecard Brand Header */}
       <div className="hidden print:flex items-center justify-between border-b pb-4 mb-2 border-slate-200">
         <div className="space-y-1 text-left">

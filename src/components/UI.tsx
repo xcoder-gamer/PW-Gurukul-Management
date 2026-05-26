@@ -75,7 +75,7 @@ export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInp
   return (
     <input
       className={cn(
-        "w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white transition-all",
+        "w-full px-5 py-2.5 h-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white transition-all",
         className
       )}
       {...props}
@@ -87,7 +87,7 @@ export function Select({ children, className, ...props }: React.SelectHTMLAttrib
   return (
     <select
       className={cn(
-        "w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white transition-all appearance-none cursor-pointer",
+        "w-full px-5 py-2.5 h-12 bg-slate-50 border border-slate-100 rounded-2xl font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-blue-100 focus:bg-white transition-all cursor-pointer md:pr-10",
         className
       )}
       {...props}
