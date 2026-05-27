@@ -1607,6 +1607,8 @@ export default function Results() {
         onBack={() => setView(detailBackView)} 
         onUpdate={() => fetchResults(selectedTestIds)} 
         autoPrint={autoPrintDetail}
+        tests={tests}
+        setSelectedResult={setSelectedResult}
       />
     );
   }
@@ -2005,7 +2007,7 @@ export default function Results() {
                   <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Correct</th>
                   <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Wrong</th>
                   <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Unattempt</th>
-                  {isAdmin && <th className="px-6 py-5 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>}
+                  <th className="px-6 py-5 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -2031,10 +2033,19 @@ export default function Results() {
                         />
                       </td>
                       {/* Col A: Student Info */}
-                      <td className="px-6 py-5">
+                      <td 
+                        className="px-6 py-5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors"
+                        onClick={() => {
+                          setSelectedResult(res); 
+                          setDetailBackView('table');
+                          setAutoPrintDetail(false);
+                          setView('detail'); 
+                        }}
+                        title="Click to view detailed student analysis"
+                      >
                         <div className="flex flex-col">
-                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1.5">{res.regNo}</span>
-                          <span className="text-sm font-black text-slate-900 leading-snug">{res.studentName}</span>
+                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1.5 group-hover/student-cell:underline">{res.regNo}</span>
+                          <span className="text-sm font-black text-slate-900 leading-snug group-hover/student-cell:text-blue-700 transition-colors">{res.studentName}</span>
                         </div>
                       </td>
                       {/* Col B: Student Details */}
@@ -2094,21 +2105,21 @@ export default function Results() {
                       <td className="px-6 py-5 text-center text-sm font-black text-emerald-500">{res.isAbsent ? '—' : (res.correct || 0)}</td>
                       <td className="px-6 py-5 text-center text-sm font-black text-rose-500">{res.isAbsent ? '—' : (res.wrong || 0)}</td>
                       <td className="px-6 py-5 text-center text-sm font-black text-slate-300">{res.isAbsent ? '—' : (res.blank || 0)}</td>
-                      {isAdmin && (
-                        <td className="px-6 py-5 text-right flex items-center justify-end gap-2">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={() => { 
-                              setSelectedResult(res); 
-                              setDetailBackView('table');
-                              setAutoPrintDetail(false);
-                              setView('detail'); 
-                            }}
-                            className="hover:bg-blue-50 hover:text-blue-600 rounded-xl"
-                          >
-                            <ChevronRight size={18} strokeWidth={3} />
-                          </Button>
+                      <td className="px-6 py-5 text-right flex items-center justify-end gap-2">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => { 
+                            setSelectedResult(res); 
+                            setDetailBackView('table');
+                            setAutoPrintDetail(false);
+                            setView('detail'); 
+                          }}
+                          className="hover:bg-blue-50 hover:text-blue-600 rounded-xl"
+                        >
+                          <ChevronRight size={18} strokeWidth={3} />
+                        </Button>
+                        {isAdmin && (
                           <Button 
                             variant="ghost" 
                             size="sm" 
@@ -2128,8 +2139,8 @@ export default function Results() {
                           >
                             <Trash2 size={16} strokeWidth={3} />
                           </Button>
-                        </td>
-                      )}
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -6281,7 +6292,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   );
 }
 
-function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, onBack: () => void, onUpdate?: () => void, autoPrint?: boolean }) {
+function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSelectedResult }: { result: any, onBack: () => void, onUpdate?: () => void, autoPrint?: boolean, tests?: any[], setSelectedResult?: (res: any) => void }) {
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
   const { qbgMap: qbgTopics } = useMetadata();
@@ -6290,6 +6301,37 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
   const [selectedPaper, setSelectedPaper] = useState<string>('');
   const [topicSort, setTopicSort] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
   const [studentProfile, setStudentProfile] = useState<any>(null);
+  const [allAttempts, setAllAttempts] = useState<any[]>([]);
+  const [loadingAttempts, setLoadingAttempts] = useState(false);
+
+  useEffect(() => {
+    const fetchAllAttempts = async () => {
+      if (!result.regNo) return;
+      setLoadingAttempts(true);
+      try {
+        const q = query(
+          collection(db, 'result_updated'),
+          where('regNo', '==', result.regNo)
+        );
+        const snap = await getDocs(q);
+        const attemptsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        // Sort attempts newest first based on test date
+        attemptsData.sort((a: any, b: any) => {
+          const testA = tests.find((t: any) => t.id === a.testId);
+          const testB = tests.find((t: any) => t.id === b.testId);
+          const dateA = testA?.date || a.testDate || a.date || '';
+          const dateB = testB?.date || b.testDate || b.date || '';
+          return dateB.localeCompare(dateA);
+        });
+        setAllAttempts(attemptsData);
+      } catch (err) {
+        console.error("Failed to fetch student attempts:", err);
+      } finally {
+        setLoadingAttempts(false);
+      }
+    };
+    fetchAllAttempts();
+  }, [result.regNo, tests]);
 
   useEffect(() => {
     const fetchStudentProfile = async () => {
@@ -6843,43 +6885,170 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint }: { result: any, on
         <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-[60px] translate-y-1/3 -translate-x-1/4" />
       </Card>
 
-      {/* Student Metadata Card */}
-      <Card className="p-8 bg-white border-slate-100 rounded-[2.5rem] shadow-sm">
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="font-black text-slate-900 tracking-tight flex items-center">
-            <UserIcon className="mr-2 text-blue-600" size={20} />
-            Student Detail Content
-          </h3>
-          <Badge variant="blue" className="bg-blue-50 text-blue-600 border-none uppercase tracking-widest text-[9px]">Verified Identity</Badge>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="space-y-1 text-center md:text-left">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Program & Batch</p>
-            <div className="flex flex-col">
-              <p className="font-bold text-slate-900">{result.programName || '—'}</p>
-              <p className="text-[10px] font-black text-blue-600 uppercase mt-0.5">{result.batchCode || result.batchName || '—'}</p>
+      {/* Student Metadata & Test Attempt History Grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        {/* Student Metadata Card */}
+        <Card className="xl:col-span-2 p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+                  <UserIcon size={20} className="stroke-[2.5]" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg leading-none mb-1">
+                    {studentProfile?.name || result.studentName}
+                  </h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{result.regNo} • Student Master Record</p>
+                </div>
+              </div>
+              <Badge variant="blue" className="bg-blue-50 text-blue-600 border-none uppercase tracking-widest text-[9px]">Verified Identity</Badge>
             </div>
-          </div>
-          <div className="space-y-1 text-center md:text-left">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Center Name</p>
-            <p className="font-bold text-slate-900">{result.centerName || '—'}</p>
-          </div>
-          <div className="space-y-1 text-center md:text-left lg:col-span-2">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Status / Registration</p>
-            <div className="flex items-center justify-center md:justify-start gap-3 mt-1">
-              <div className="flex items-center gap-2">
-                <Badge variant={result.isAbsent ? 'slate' : 'green'} className="text-[10px]">
-                  {result.isAbsent ? 'ABSENT' : 'PRESENT'}
-                </Badge>
-                <Badge variant={result.testMode === 'online' ? 'blue' : 'slate'} className="text-[10px] uppercase">
-                  {result.testMode || 'offline'}
-                </Badge>
-                <span className="text-sm font-black text-slate-700 tracking-tight">{result.regNo}</span>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Academic Program</p>
+                <p className="font-bold text-slate-900 text-xs truncate" title={result.programName}>{result.programName || '—'}</p>
+                <p className="text-[10px] font-black text-blue-600 uppercase truncate mt-0.5" title={result.batchCode || result.batchName}>{result.batchCode || result.batchName || '—'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Center Location</p>
+                <p className="font-bold text-slate-900 text-xs truncate" title={result.centerName}>{result.centerName || '—'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Contact Details</p>
+                <p className="text-[11px] font-bold text-slate-800 truncate" title={studentProfile?.email || result.email}>{studentProfile?.email || result.email || 'No email profile'}</p>
+                <p className="text-[11px] font-mono font-bold text-slate-500 mt-0.5">{studentProfile?.phone || result.phone || 'No phone profile'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Status & Mode</p>
+                <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                  <Badge variant={result.isAbsent ? 'slate' : 'green'} className="text-[9px] font-extrabold uppercase py-0.5 px-1.5">
+                    {result.isAbsent ? 'ABSENT' : 'PRESENT'}
+                  </Badge>
+                  <Badge variant={result.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] font-extrabold uppercase py-0.5 px-1.5">
+                    {result.testMode || 'offline'}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Extra row for student attributes */}
+              <div className="space-y-1 pt-3 border-t border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Target Prep Year</p>
+                <p className="font-extrabold text-slate-900 text-xs">
+                  {studentProfile?.targetYear || result.targetYear || '—'}
+                </p>
+              </div>
+              <div className="space-y-1 pt-3 border-t border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Rank Target Goal</p>
+                <p className="font-extrabold text-blue-600 text-xs">
+                  {studentProfile?.rankTarget || result.rankTarget || '—'}
+                </p>
+              </div>
+              <div className="space-y-1 pt-3 border-t border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Enrollment Type</p>
+                <span className="text-[8.5px] font-extrabold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 uppercase tracking-wide inline-block mt-0.5">
+                  {studentProfile?.type || result.type || 'Standard'}
+                </span>
+              </div>
+              <div className="space-y-1 pt-3 border-t border-slate-100">
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Student Gender</p>
+                <p className="font-bold text-slate-800 text-xs capitalize">
+                  {studentProfile?.gender || '—'}
+                </p>
               </div>
             </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+
+        {/* OMR Attempts and History Card */}
+        <Card className="xl:col-span-1 p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm flex flex-col justify-between max-h-[350px] xl:max-h-[400px]">
+          <div>
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-50">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600">
+                  <TrendingUp size={16} className="stroke-[2.5]" />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm leading-tight">OMR Attempt History</h4>
+                  <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wide">All test attempts tracked</p>
+                </div>
+              </div>
+              <Badge variant="amber" className="bg-orange-50 text-orange-600 border-none font-bold text-[9px]">{allAttempts.length} Attempts</Badge>
+            </div>
+
+            {loadingAttempts ? (
+              <div className="flex flex-col items-center justify-center py-10 space-y-2">
+                <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Loading history...</p>
+              </div>
+            ) : allAttempts.length > 0 ? (
+              <div className="overflow-y-auto pr-1 space-y-2.5 max-h-[220px] xl:max-h-[260px] no-scrollbar">
+                {allAttempts.map((attempt) => {
+                  const matchT = tests?.find((t: any) => t.id === attempt.testId);
+                  const tName = matchT?.testName || attempt.testName || 'Unknown OMR Test';
+                  const tDate = matchT?.date || attempt.testDate || '—';
+                  const tMax = matchT?.maxScore || attempt.testMaxScore || attempt.totalMarks || attempt.maxScore || '—';
+                  const isCurrent = attempt.id === result.id;
+                  
+                  return (
+                    <div 
+                      key={attempt.id} 
+                      onClick={() => {
+                        if (!isCurrent) {
+                          setSelectedResult?.(attempt);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }
+                      }}
+                      className={cn(
+                        "p-3 rounded-2xl border transition-all flex flex-col justify-between gap-1",
+                        isCurrent 
+                          ? "bg-slate-900 border-slate-900 text-white shadow-md shadow-slate-200"
+                          : "bg-slate-50 hover:bg-orange-50/50 border-transparent hover:border-orange-100 cursor-pointer"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={cn("text-xs font-black truncate max-w-[140px] sm:max-w-[200px]", isCurrent ? "text-white" : "text-slate-800")}>
+                          {tName}
+                        </p>
+                        <span className={cn("text-[8px] font-mono font-bold uppercase", isCurrent ? "text-orange-300" : "text-slate-400")}>
+                          {tDate}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1 text-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn("font-black text-xs", isCurrent ? "text-orange-400" : "text-blue-600")}>
+                            {attempt.isAbsent ? 'ABSENT' : `${attempt.score}/${tMax}`}
+                          </span>
+                          {!attempt.isAbsent && (
+                            <span className={cn("text-[9px] font-extrabold", isCurrent ? "text-white/80" : "text-slate-500")}>
+                              ({Math.round(attempt.accuracy || 0)}% Acc)
+                            </span>
+                          )}
+                        </div>
+                        {!attempt.isAbsent && (
+                          <div className={cn(
+                            "px-2 py-0.5 rounded-lg text-[9px] font-black",
+                            isCurrent 
+                              ? "bg-white/10 text-white" 
+                              : "bg-slate-100 text-slate-700"
+                          )}>
+                            Rank #{attempt.rank || '—'}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-10">
+                <p className="text-xs text-slate-400 italic font-medium">No other test attempts logged.</p>
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 print:block print:space-y-6">
         <div className="lg:col-span-1 space-y-6">
