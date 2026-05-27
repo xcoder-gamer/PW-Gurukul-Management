@@ -982,13 +982,31 @@ export default function Results() {
       const test = tests.find(t => t.id === targetTestId);
       if (!test) throw new Error('Test template not found');
 
-      // Extract unique registration numbers from OMR sheet to fetch student records surgically
-      const regNosInFile = Array.from(new Set(jsonData.map(row => {
+      // 1. Check for duplicate registration numbers in the uploaded file itself
+      const rawRegNosInFile = jsonData.map(row => {
         const regNoRaw = getRowValue(row, ['regNo', 'registrationNo', 'rollNo', 'id', 'reg_no', 'roll_no', 'studid', 'rollnum', 'enrollmentno', 'student_id']);
-        return String(regNoRaw || '').trim();
-      }).filter(Boolean)));
+        return String(regNoRaw || '').trim().toUpperCase();
+      }).filter(Boolean);
 
-      // 1. Fetch Masters for resolution
+      const seenRegNos = new Set<string>();
+      const duplicateRegNos = new Set<string>();
+      for (const r of rawRegNosInFile) {
+        if (seenRegNos.has(r)) {
+          duplicateRegNos.add(r);
+        } else {
+          seenRegNos.add(r);
+        }
+      }
+
+      if (duplicateRegNos.size > 0) {
+        setIsProcessingBulk(false);
+        toast.error(`OMR upload aborted: Duplicate registration numbers found in file: ${Array.from(duplicateRegNos).join(', ')}`, { id: toastId });
+        return;
+      }
+
+      const regNosInFile = Array.from(new Set(rawRegNosInFile));
+
+      // 2. Fetch Masters for resolution
       const [existingResultsSnap] = await Promise.all([
         getDocs(query(collection(db, 'result_updated'), where('testId', '==', targetTestId)))
       ]);
@@ -1014,6 +1032,33 @@ export default function Results() {
           })
         );
         studentMaster = studentChunks.flat();
+      }
+
+      // 3. Validate Test and Student Program Mismatch
+      if (test.programId) {
+        const testProgram = metaPrograms.find((p: any) => p.id === test.programId);
+        const testProgramName = testProgram?.programName || 'Selected Test Program';
+        
+        const programMismatches: string[] = [];
+        
+        jsonData.forEach(row => {
+          const regNoRaw = getRowValue(row, ['regNo', 'registrationNo', 'rollNo', 'id', 'reg_no', 'roll_no', 'studid', 'rollnum', 'enrollmentno', 'student_id']);
+          const regNo = String(regNoRaw || '').trim().toUpperCase();
+          if (!regNo) return;
+          
+          const student = studentMaster.find((s: any) => String(s.regNo || '').trim().toUpperCase() === regNo);
+          if (student && student.programId && student.programId !== test.programId) {
+            const studentProg = metaPrograms.find((p: any) => p.id === student.programId);
+            const studentProgName = studentProg?.programName || 'Unknown Program';
+            programMismatches.push(`${student.name || regNo} (${regNo}) belongs to program "${studentProgName}" but the test is for "${testProgramName}"`);
+          }
+        });
+
+        if (programMismatches.length > 0) {
+          setIsProcessingBulk(false);
+          toast.error(`OMR upload aborted: Students from a different program were detected in the file:\n${programMismatches.join('\n')}`, { id: toastId, duration: 6000 });
+          return;
+        }
       }
 
       const existingResultsMap = existingResultsSnap.docs.reduce((acc: any, d) => {
