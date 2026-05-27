@@ -5914,8 +5914,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   <table className="w-full border-collapse text-xs text-left">
                     <thead>
                        {/* First Row Header Groups */}
-                      <tr className="bg-[#0b1329] text-white border-b border-slate-800 sticky top-0 z-30">
-                        <th rowSpan={2} className="px-6 py-5 border-r-[3.5px] border-r-amber-700/80 align-middle min-w-[260px] sticky left-0 top-0 bg-[#0b1329] z-40 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
+                      <tr className="bg-[#0b1329] text-white border-b border-slate-800 sticky top-0 z-40">
+                        <th rowSpan={2} className="px-6 py-5 border-r-[3.5px] border-r-amber-700/80 align-middle min-w-[260px] sticky left-0 top-0 bg-[#0b1329] z-50 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
                           <div className="text-xs font-black uppercase tracking-widest font-mono text-blue-400">Student Profile</div>
                           <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Roll-No / Program Batch</div>
                         </th>
