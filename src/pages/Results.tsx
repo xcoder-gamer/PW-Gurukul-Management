@@ -619,6 +619,546 @@ export const getTotalSubjectMark = (subStat: any, subName: string, testPattern: 
 // Session-level memory cache to avoid redundant expensive reads of student profiles
 const studentCache: Record<string, any> = {};
 
+interface StudentAnalysisDashboardProps {
+  regNo: string;
+  onBack: () => void;
+}
+
+function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardProps) {
+  const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap } = useMetadata();
+  const [student, setStudent] = useState<any>(null);
+  const [attempts, setAttempts] = useState<any[]>([]);
+  const [tests, setTests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadAll = async () => {
+      setLoading(true);
+      try {
+        // 1. Fetch student info
+        const studentRef = doc(db, 'students', regNo.toUpperCase());
+        const studentDoc = await getDoc(studentRef);
+        let studentData = null;
+        if (studentDoc.exists()) {
+          studentData = { id: studentDoc.id, ...studentDoc.data() };
+        } else {
+          // Fallback if the doc isn't indexed by uppercase ID
+          const qS = query(collection(db, 'students'), where('regNo', '==', regNo));
+          const snapS = await getDocs(qS);
+          if (!snapS.empty) {
+            studentData = { id: snapS.docs[0].id, ...snapS.docs[0].data() };
+          }
+        }
+        setStudent(studentData);
+
+        // 2. Fetch tests so we can resolve testMaxScore / maxScore
+        const testsSnap = await getDocs(collection(db, 'tests'));
+        const testsData = testsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setTests(testsData);
+
+        // 3. Fetch all result attempts
+        const qR = query(collection(db, 'result_updated'), where('regNo', '==', regNo));
+        const snapR = await getDocs(qR);
+        const attemptsData = snapR.docs.map(d => ({ id: d.id, ...d.data() }));
+        setAttempts(attemptsData);
+      } catch (err) {
+        console.error("Failed to fetch student analysis data:", err);
+        toast.error("Failed to load student analysis dashboard");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadAll();
+  }, [regNo]);
+
+  const stats = useMemo(() => {
+    if (attempts.length === 0) return null;
+
+    let totalScore = 0;
+    let totalCorrect = 0;
+    let totalWrong = 0;
+    let totalBlank = 0;
+    let testsTaken = 0;
+
+    const attemptsList = attempts.map(att => {
+      const matchT = tests.find(t => t.id === att.testId);
+      const mName = matchT?.name || att.testName || 'Unknown Test';
+      const mDate = matchT?.date || att.testDate || att.date || '—';
+      const mMaxScore = matchT?.maxScore || att.maxScore || att.totalMarks || 360;
+      const pct = mMaxScore > 0 ? (att.score / mMaxScore) * 100 : 0;
+      const acc = Math.round((att.correct / (att.correct + att.wrong || 1)) * 100);
+
+      totalScore += att.score || 0;
+      totalCorrect += att.correct || 0;
+      totalWrong += att.wrong || 0;
+      totalBlank += att.blank || 0;
+      testsTaken++;
+
+      return {
+        ...att,
+        testName: mName,
+        testDate: mDate,
+        maxScore: mMaxScore,
+        percentage: pct,
+        accuracy: acc
+      };
+    });
+
+    const avgScore = testsTaken > 0 ? Math.round(totalScore / testsTaken) : 0;
+    const avgAccuracy = Math.round((totalCorrect / (totalCorrect + totalWrong || 1)) * 100);
+
+    // Find highest and lowest by PERCENTAGE as explicitly requested:
+    // "everything highest , lowest with the % not a number because eveytime possibility is base is different"
+    let maxAttempt = attemptsList.length > 0 ? attemptsList[0] : null;
+    let minAttempt = attemptsList.length > 0 ? attemptsList[0] : null;
+
+    for (const att of attemptsList) {
+      if (!maxAttempt || att.percentage > maxAttempt.percentage) {
+        maxAttempt = att;
+      }
+      if (!minAttempt || att.percentage < minAttempt.percentage) {
+        minAttempt = att;
+      }
+    }
+
+    // Concept / Topic scoring
+    const conceptScores: Record<string, { correct: number, total: number, subject: string, chapter: string, topicName: string }> = {};
+    attemptsList.forEach(att => {
+      const mapped = att.mappedEvaluation || [];
+      mapped.forEach((ev: any) => {
+        const sName = ev.subject || 'N/A';
+        const cName = ev.chapter || 'N/A';
+        const tName = qbgMap?.[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
+        const comboKey = `${sName} - ${cName} - ${tName}`;
+        if (!conceptScores[comboKey]) {
+          conceptScores[comboKey] = {
+            correct: 0,
+            total: 0,
+            subject: sName,
+            chapter: cName,
+            topicName: tName
+          };
+        }
+        conceptScores[comboKey].total++;
+        if (ev.status === 'correct') {
+          conceptScores[comboKey].correct++;
+        }
+      });
+    });
+
+    const conceptsList = Object.values(conceptScores).map((c: any) => ({
+      ...c,
+      accuracy: Math.round((c.correct / c.total) * 100)
+    }));
+
+    // Strengths (high accuracy) and Growth chapters (low accuracy)
+    const strengths = [...conceptsList]
+      .filter(c => c.accuracy >= 70)
+      .sort((a, b) => b.accuracy - a.accuracy || b.total - a.total)
+      .slice(0, 6);
+
+    const weaknesses = [...conceptsList]
+      .filter(c => c.accuracy < 70)
+      .sort((a, b) => a.accuracy - b.accuracy || b.total - a.total)
+      .slice(0, 6);
+
+    // Subject Performance list
+    const subjectAggregates: Record<string, { correct: number, total: number }> = {};
+    attemptsList.forEach(att => {
+      const mapped = att.mappedEvaluation || [];
+      mapped.forEach((ev: any) => {
+        const sName = ev.subject || 'N/A';
+        if (!subjectAggregates[sName]) {
+          subjectAggregates[sName] = { correct: 0, total: 0 };
+        }
+        subjectAggregates[sName].total++;
+        if (ev.status === 'correct') {
+          subjectAggregates[sName].correct++;
+        }
+      });
+    });
+
+    const subjectStats = Object.entries(subjectAggregates).map(([subject, sStats]) => {
+      const correct = sStats.correct;
+      const total = sStats.total;
+      const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+      return {
+        subject,
+        correct,
+        total,
+        accuracy
+      };
+    }).sort((a, b) => b.accuracy - a.accuracy);
+
+    return {
+      testsTaken,
+      avgScore,
+      avgAccuracy,
+      maxAttempt,
+      minAttempt,
+      strengths,
+      weaknesses,
+      subjectStats,
+      attemptsList: attemptsList.sort((a, b) => {
+        const dateA = new Date(a.testDate).getTime() || 0;
+        const dateB = new Date(b.testDate).getTime() || 0;
+        return dateB - dateA; // reverse chronological default
+      })
+    };
+  }, [attempts, tests, qbgMap]);
+
+  if (loading) {
+    return <Loader fullScreen label="Loading Detailed Student Dashboard..." />;
+  }
+
+  // Resolve metadata batch and center names manually for beautiful headers
+  const batchCodeResolved = student ? metaBatches.find(b => b.id === student.batchId)?.batchCode || student.batchCode || '—' : '—';
+  const centerNameResolved = student ? metaCenters.find(c => c.id === student.centerId)?.centerName || student.centerName || '—' : '—';
+  const programNameResolved = student ? metaPrograms.find(p => p.id === student.programId)?.programName || student.programName || '—' : '—';
+
+  return (
+    <div className="min-h-screen bg-slate-50/50 p-4 md:p-8 space-y-8 font-sans antialiased text-slate-800">
+      {/* Upper Navigation & Dashboard Header card */}
+      <Card className="bg-white border-slate-100 p-8 rounded-[2rem] shadow-sm space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onBack}
+              className="w-10 h-10 rounded-xl border-slate-200 flex items-center justify-center p-0 flex-shrink-0 hover:bg-slate-50 transition-colors"
+              title="Back"
+            >
+              <ChevronLeft size={20} strokeWidth={3} className="text-slate-600" />
+            </Button>
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight leading-none">
+                  {student?.name || 'Academic Record Summary'}
+                </h1>
+                <Badge variant="blue" className="bg-blue-50 text-blue-600 border-none font-black text-[10px] h-5 py-0">
+                  STUDENT PORTAL
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-[11px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                  REG: {student?.regNo || regNo}
+                </span>
+                {student?.type && (
+                  <span className="text-[10px] font-black text-violet-700 bg-violet-50 px-2 py-0.5 rounded border border-violet-150 uppercase tracking-widest font-mono">
+                    {student.type}
+                  </span>
+                )}
+                {student?.rankTarget && (
+                  <span className="text-[10px] font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-150 uppercase tracking-widest font-mono flex items-center gap-1">
+                    <Target size={11} className="text-amber-500" />
+                    TARGET: {student.rankTarget} ({student.targetYear || '—'})
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="text-left">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Batch Profile</span>
+              <span className="text-slate-700 font-extrabold text-sm">{batchCodeResolved}</span>
+              <span className="text-slate-400 font-bold block text-[10px] leading-none mt-0.5 max-w-[200px] truncate" title={programNameResolved}>
+                {programNameResolved}
+              </span>
+            </div>
+            <div className="h-10 w-px bg-slate-200 hidden sm:block" />
+            <div className="text-left">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Academic Center</span>
+              <span className="text-slate-700 font-extrabold text-sm block">{centerNameResolved}</span>
+            </div>
+            {stats && (
+              <>
+                <div className="h-10 w-px bg-slate-200 hidden sm:block" />
+                <div className="flex gap-4 items-center pl-2">
+                  <div className="bg-slate-50 rounded-xl px-4 py-2 border border-slate-100/50">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">TESTS</span>
+                    <span className="text-slate-800 font-black text-lg">{stats.testsTaken} Attempts</span>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl px-4 py-2 border border-slate-100/50">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider block">AVG SCORE</span>
+                    <span className="text-slate-800 font-black text-lg">{stats.avgScore}</span>
+                  </div>
+                  <div className="bg-emerald-50 rounded-xl px-4 py-2 border border-emerald-100/30">
+                    <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider block">AVG ACCURACY</span>
+                    <span className="text-emerald-700 font-black text-lg">{stats.avgAccuracy}%</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {!stats ? (
+        <Card className="bg-white border-slate-150 p-20 text-center rounded-[2rem] shadow-sm space-y-4">
+          <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400 shadow-inner">
+            <Activity size={32} />
+          </div>
+          <h3 className="font-extrabold text-slate-800 text-lg">No Results Detected</h3>
+          <p className="text-slate-400 max-w-md mx-auto text-sm leading-relaxed">
+            There are currently no standard OMR test attempts tracked in our database for registration number <strong>{regNo.toUpperCase()}</strong>.
+          </p>
+          <Button variant="primary" onClick={onBack} size="md" className="rounded-xl px-6 bg-blue-600 mt-2">
+            Return to Master Directory
+          </Button>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Column 1: Score Milestones with % directly listed block */}
+          <section className="lg:col-span-1 space-y-6">
+            <h3 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.2em] pl-1">
+              SCORE MILESTONES (AVG {stats.avgScore})
+            </h3>
+            
+            <div className="grid grid-cols-1 gap-6">
+              {/* Highest Score Attempt Card */}
+              <Card className="bg-white border border-emerald-100 rounded-[2rem] p-6 shadow-sm space-y-4 relative overflow-hidden group hover:scale-[1.01] transition-transform">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -z-10 opacity-40 group-hover:scale-110 transition-transform" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full uppercase tracking-widest">
+                    Highest Performance
+                  </span>
+                  <TrendingUp className="text-emerald-500" size={18} />
+                </div>
+                
+                {stats.maxAttempt && (
+                  <div className="space-y-2">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-black text-emerald-600 tracking-tight">
+                        {stats.maxAttempt.percentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-800 leading-normal line-clamp-2" title={stats.maxAttempt.testName}>
+                        {stats.maxAttempt.testName}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 font-mono text-[10px] text-slate-400 font-bold">
+                        <span>Score: {stats.maxAttempt.score} / {stats.maxAttempt.maxScore}</span>
+                        <span>•</span>
+                        <span>{stats.maxAttempt.testDate}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* Lowest Score Attempt Card */}
+              <Card className="bg-white border border-rose-100 rounded-[2rem] p-6 shadow-sm space-y-4 relative overflow-hidden group hover:scale-[1.01] transition-transform">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-rose-50 rounded-bl-full -z-10 opacity-40 group-hover:scale-110 transition-transform" />
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black text-rose-800 bg-rose-50 px-3 py-1 rounded-full uppercase tracking-widest">
+                    Lowest Performance
+                  </span>
+                  <TrendingDown className="text-rose-500" size={18} />
+                </div>
+                
+                {stats.minAttempt && (
+                  <div className="space-y-2">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-4xl font-black text-rose-500 tracking-tight">
+                        {stats.minAttempt.percentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-800 leading-normal line-clamp-2" title={stats.minAttempt.testName}>
+                        {stats.minAttempt.testName}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-1 font-mono text-[10px] text-slate-400 font-bold">
+                        <span>Score: {stats.minAttempt.score} / {stats.minAttempt.maxScore}</span>
+                        <span>•</span>
+                        <span>{stats.minAttempt.testDate}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          </section>
+
+          {/* Column 2: Subject Performance with accurate breakdown */}
+          <section className="lg:col-span-1 space-y-6">
+            <h3 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.2em] pl-1">
+              SUBJECT PERFORMANCE
+            </h3>
+
+            <Card className="bg-white border-slate-100 p-6 rounded-[2rem] shadow-sm space-y-5">
+              {stats.subjectStats.length > 0 ? (
+                stats.subjectStats.map((sub, i) => {
+                  const barColor = sub.subject === 'Physics' ? 'bg-amber-500' : sub.subject === 'Chemistry' ? 'bg-blue-500' : 'bg-emerald-500';
+                  const titleColor = sub.subject === 'Physics' ? 'text-amber-800 bg-amber-50' : sub.subject === 'Chemistry' ? 'text-blue-800 bg-blue-50' : 'text-emerald-800 bg-emerald-50';
+
+                  return (
+                    <div key={i} className="p-4 rounded-2xl bg-slate-50/50 border border-slate-100/40 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className={cn("text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider", titleColor)}>
+                          {sub.subject}
+                        </span>
+                        <span className="text-sm font-black text-slate-850">
+                          {sub.accuracy}%
+                        </span>
+                      </div>
+                      
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={cn("h-full rounded-full", barColor)} style={{ width: `${sub.accuracy}%` }} />
+                      </div>
+
+                      <div className="flex items-center justify-between font-mono text-[10px] text-slate-400 font-bold leading-none mt-1">
+                        <span>C: {sub.correct} / T: {sub.total} Questions</span>
+                        <span className="text-[9px] uppercase tracking-wider font-sans text-slate-300">View Details</span>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="text-center text-xs text-slate-400 py-10 italic">No subject aggregates computed.</p>
+              )}
+            </Card>
+          </section>
+
+          {/* Column 3: Strength Chapters & Topics */}
+          <section className="lg:col-span-1 space-y-6">
+            <h3 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.2em] pl-1">
+              STRENGTH TOPICS (≥ 70% ACCURACY)
+            </h3>
+
+            <Card className="bg-white border-slate-100 p-6 rounded-[2rem] shadow-sm h-[calc(100%-2.5rem)] flex flex-col justify-between">
+              <div className="space-y-4">
+                {stats.strengths.length > 0 ? (
+                  stats.strengths.map((st, i) => (
+                    <div key={i} className="flex gap-3 items-start border-b border-dashed border-slate-50 pb-3 last:border-none last:pb-0">
+                      <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 mt-1 flex-shrink-0" />
+                      <div className="space-y-0.5 min-w-0 flex-1">
+                        <p className="text-xs font-black text-slate-800 leading-normal truncate" title={st.topicName}>
+                          {st.topicName}
+                        </p>
+                        <p className="text-[10px] font-bold text-slate-400 leading-none truncate max-w-[170px]" title={st.chapter}>
+                          {st.chapter}
+                        </p>
+                      </div>
+                      <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors border-none text-[10px] font-black rounded-lg h-6">
+                        {st.accuracy}%
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center text-xs text-slate-400 py-12 italic">No topics achieved ≥ 70% average accuracy yet.</p>
+                )}
+              </div>
+            </Card>
+          </section>
+
+          {/* Column 4: Growth Opportunities */}
+          <section className="lg:col-span-1 space-y-6">
+            <h3 className="font-black text-[11px] text-slate-400 uppercase tracking-[0.2em] pl-1">
+              GROWTH OPPORTUNITIES
+            </h3>
+
+            <Card className="bg-white border-slate-100 p-6 rounded-[2rem] shadow-sm h-[calc(100%-2.5rem)] flex flex-col justify-between">
+              <div className="space-y-4">
+                {stats.weaknesses.length > 0 ? (
+                  stats.weaknesses.map((wk, i) => (
+                    <div key={i} className="flex gap-3 items-start border-b border-dashed border-slate-50 pb-3 last:border-none last:pb-0">
+                      <div className="w-2.5 h-2.5 rounded-full bg-rose-450 mt-1 flex-shrink-0" />
+                      <div className="space-y-0.5 min-w-0 flex-1">
+                        <p className="text-xs font-black text-slate-800 leading-normal truncate" title={wk.topicName}>
+                          {wk.topicName}
+                        </p>
+                        <p className="text-[10px] font-bold text-slate-400 leading-none truncate max-w-[170px]" title={wk.chapter}>
+                          {wk.chapter}
+                        </p>
+                      </div>
+                      <Badge className="bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors border-none text-[10px] font-black rounded-lg h-6">
+                        {wk.accuracy}%
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-center text-xs text-slate-400 py-12 italic">Clear! No topics below 70% accuracy recorded.</p>
+                )}
+              </div>
+            </Card>
+          </section>
+        </div>
+      )}
+
+      {/* Attempt History Section at the bottom */}
+      {stats && stats.attemptsList.length > 0 && (
+        <section className="space-y-6">
+          <h3 className="font-black text-lg text-slate-900 tracking-tight pl-0.5">
+            OMR ATTEMPT HISTORY (ALL TEST ATTEMPTS TRACKED)
+          </h3>
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
+            <div className="overflow-x-auto no-scrollbar">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50/50">
+                  <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest pl-4">
+                    <th className="px-6 py-4">Test Date</th>
+                    <th className="px-6 py-4">Test Series / Chapter Name</th>
+                    <th className="px-6 py-4 text-center">Correct Answers</th>
+                    <th className="px-6 py-4 text-center">Incorrect Answers</th>
+                    <th className="px-6 py-4 text-center">Unattempted</th>
+                    <th className="px-6 py-4 text-center">Max Score</th>
+                    <th className="px-6 py-4 text-center">Score</th>
+                    <th className="px-6 py-4 text-right">Percentage Score</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {stats.attemptsList.map((att, i) => (
+                    <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 py-4 text-xs font-bold text-slate-500 font-mono">
+                        {att.testDate}
+                      </td>
+                      <td className="px-6 py-4 max-w-[280px]">
+                        <p className="text-xs font-black text-slate-800 truncate" title={att.testName}>
+                          {att.testName}
+                        </p>
+                        <Badge variant="slate" className="text-[8.5px] uppercase tracking-wide h-4 py-0 mt-1 leading-none font-sans font-black bg-slate-50 text-slate-400 border-none">
+                          {att.testMode || 'offline'}
+                        </Badge>
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold text-emerald-600 text-xs font-mono">
+                        {att.correct}
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold text-rose-500 text-xs font-mono">
+                        {att.wrong}
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold text-slate-400 text-xs font-mono">
+                        {att.blank}
+                      </td>
+                      <td className="px-6 py-4 text-center font-bold text-slate-500 text-xs font-mono">
+                        {att.maxScore}
+                      </td>
+                      <td className="px-6 py-4 text-center font-black text-slate-900 text-sm font-mono0">
+                        {att.score}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <Badge className={cn(
+                          "text-[10px] font-black font-mono py-1 px-2.5 h-6 rounded-lg",
+                          att.percentage >= 70 ? "bg-emerald-100 text-emerald-700" :
+                          att.percentage >= 40 ? "bg-amber-100 text-amber-700" :
+                          "bg-rose-100 text-rose-700"
+                        )}>
+                          {att.percentage.toFixed(1)}%
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
 export default function Results() {
   const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
@@ -1599,6 +2139,23 @@ export default function Results() {
   };
 
 
+
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const studentRegNoParam = searchParams.get('studentRegNo');
+
+  if (studentRegNoParam) {
+    return (
+      <StudentAnalysisDashboard 
+        regNo={studentRegNoParam} 
+        onBack={() => {
+          // Clean the query parameter and refresh status
+          window.history.pushState({}, '', window.location.pathname);
+          window.location.reload();
+        }} 
+      />
+    );
+  }
 
   if (view === 'detail' && selectedResult) {
     return (
@@ -4974,22 +5531,22 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {aggregateStats.studentTable.map((s: any) => {
-                  const isExpanded = expandedStudentKey === s.sKey;
+                  const isExpanded = false; // Always collapsed to avoid clutter and encourage new window analysis
                   return (
                     <React.Fragment key={`${s.regNo}_${s.studentName}`}>
                       <tr 
-                        onClick={() => setExpandedStudentKey(isExpanded ? '' : s.sKey)}
-                        className={cn(
-                          "hover:bg-slate-50/80 transition-all duration-200 group cursor-pointer",
-                          isExpanded && "bg-slate-50/50"
-                        )}
+                        onClick={() => {
+                          const url = `${window.location.origin}/results?studentRegNo=${s.regNo}`;
+                          window.open(url, '_blank');
+                        }}
+                        className="hover:bg-slate-50/80 transition-all duration-200 group cursor-pointer"
                       >
                         <td className="px-6 py-5">
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-905 group-hover:text-blue-600 transition-colors flex items-center gap-2">
                               {s.studentName}
                               <span className="text-[9px] text-slate-400 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded-full transition-colors font-medium">
-                                {isExpanded ? 'Collapse' : 'Click to Analyze'}
+                                Analyze Profile ↗
                               </span>
                             </span>
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">

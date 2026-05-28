@@ -56,8 +56,8 @@ export const invalidateStudentCache = () => {
 
 export default function Students() {
   const { user, role, centerId, batchIds } = useAuth();
-  const isAdmin = role === 'admin';
-  const isViewOnly = role === 'center' || role === 'center_level' || role === 'teacher' || role === 'central' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isViewOnly = role === 'center' || role === 'center_level' || role === 'teacher' || role === 'central';
   const canEdit = isAdmin;
   
   const [students, setStudents] = useState<any[]>([]);
@@ -1794,10 +1794,12 @@ function StudentRow({ student, selected, onSelect, onClick, onEditClick, onDelet
           <Button 
             variant="secondary" 
             size="sm" 
-            className="w-7 h-7 p-0 bg-white border border-slate-100/60 rounded-full hover:bg-slate-50 hover:border-slate-200 text-slate-400 hover:text-slate-600 transition-all flex items-center justify-center active:scale-90 shadow-sm"
+            className="w-7 h-7 p-0 bg-indigo-50 border border-transparent rounded-full hover:bg-indigo-150 text-indigo-650 hover:text-indigo-800 transition-all flex items-center justify-center active:scale-90 shadow-sm"
+            title="Open detailed analysis in new tab"
             onClick={(e: React.MouseEvent) => {
               e.stopPropagation();
-              onClick(student);
+              const url = `${window.location.origin}/results?studentRegNo=${student.regNo || student.id}`;
+              window.open(url, '_blank');
             }}
           >
              <ChevronRight size={14} strokeWidth={3} />

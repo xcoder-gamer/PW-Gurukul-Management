@@ -12,7 +12,7 @@ export function BottomNav() {
   const navItems = [
     { to: '/', icon: Home, label: 'Home', allow: ['admin', 'operator', 'central_team'] },
     { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
-    { to: '/tests', icon: BookOpen, label: 'Tests', allow: ['admin', 'operator', 'central_team', 'center_level', 'center'] },
+    { to: '/tests', icon: BookOpen, label: 'Tests', allow: ['admin', 'operator', 'central_team'] },
     { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
     { to: '/more', icon: MoreHorizontal, label: 'More', allow: ['admin', 'operator'] },
   ].filter(item => !role || item.allow.includes(role));

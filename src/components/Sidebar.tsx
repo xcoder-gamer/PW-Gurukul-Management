@@ -27,7 +27,7 @@ export function Sidebar({ isCollapsed = false, onToggle }: SidebarProps) {
   const navItems = [
     { to: '/', icon: Home, label: 'Dashboard', allow: ['admin', 'operator', 'central_team'] },
     { to: '/students', icon: Users, label: 'Students', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
-    { to: '/tests', icon: BookOpen, label: 'Test Series', allow: ['admin', 'operator', 'central_team', 'center_level', 'center'] },
+    { to: '/tests', icon: BookOpen, label: 'Test Series', allow: ['admin', 'operator', 'central_team'] },
     { to: '/results', icon: BarChart3, label: 'Analysis', allow: ['admin', 'operator', 'central_team', 'central', 'center_level', 'center', 'teacher'] },
     { to: '/masters/qbg', icon: Database, label: 'QBG Master', allow: ['admin', 'operator'] },
     { to: '/logs', icon: LayoutDashboard, label: 'Audit Logs', allow: ['admin', 'operator'] },
