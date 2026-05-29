@@ -1515,11 +1515,15 @@ export default function Tests() {
           )}
         </AnimatePresence>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
           {loading ? (
-            Array(8).fill(0).map((_, i) => <div key={i} className="h-48 bg-white rounded-[2.5rem] animate-pulse border border-slate-100" />)
+            <div className="p-12 space-y-4">
+              {Array(6).fill(0).map((_, i) => (
+                <div key={i} className="h-16 bg-slate-50/55 rounded-2xl animate-pulse border border-slate-50 flex items-center justify-between px-6" />
+              ))}
+            </div>
           ) : filteredTests.length === 0 ? (
-            <Card className="col-span-full p-20 flex flex-col items-center justify-center text-center space-y-4 border-dashed border-2 border-slate-100">
+            <Card className="p-20 flex flex-col items-center justify-center text-center space-y-4 border-dashed border-2 border-slate-100 mx-6 my-6">
                <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center text-slate-200">
                   <FileJson size={40} />
                </div>
@@ -1534,91 +1538,104 @@ export default function Tests() {
                </Button>
             </Card>
           ) : (
-            filteredTests.map((test) => (
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} key={test.id} className="relative">
-                <div className="absolute top-4 left-4 z-10">
-                  <input 
-                    type="checkbox"
-                    className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer transition-all bg-white"
-                    checked={selectedTestIds.includes(test.id)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      setSelectedTestIds(prev => 
-                        prev.includes(test.id) ? prev.filter(id => id !== test.id) : [...prev, test.id]
-                      );
-                    }}
-                  />
-                </div>
-                <Card 
-                  className={cn(
-                    "p-6 h-full flex flex-col justify-between hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 group border-slate-100 cursor-pointer overflow-hidden",
-                    test.status === 'DRAFT' && "border-amber-200 bg-amber-50/20",
-                    selectedTestIds.includes(test.id) && "border-blue-500 ring-2 ring-blue-500/10 bg-blue-50/20"
-                  )}
-                  onClick={() => {
-                    if (test.status === 'DRAFT') {
-                      startEditing(test);
-                      setStep(test.answerKey && Object.keys(test.answerKey).length > 0 ? 3 : 1);
-                    } else {
-                      setSelectedTest(test);
-                      setView('detail');
-                    }
-                  }}
-                >
-                  <div className="space-y-4">
-                    <div className="flex items-start justify-between">
-                      <div className={cn(
-                        "p-3 rounded-2xl transition-colors duration-300",
-                        test.status === 'DRAFT' ? "bg-amber-100 text-amber-600" : "bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
-                      )}>
-                        {test.status === 'DRAFT' ? <Save size={20} strokeWidth={3} /> : <Check size={20} strokeWidth={3} />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                          <button 
-                             onClick={(e) => {
-                                e.stopPropagation();
-                                startEditing(test);
-                             }}
-                             className="p-2 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-xl text-slate-400 transition-all shadow-sm"
-                          >
-                             <Pencil size={16} strokeWidth={3} />
-                          </button>
-                          {isAdmin && (
-                            <button 
-                              onClick={(e) => {
-                                 e.stopPropagation();
-                                 handleDeleteTest(test.id);
-                              }}
-                              className="p-2 bg-slate-100 hover:bg-rose-600 hover:text-white rounded-xl text-slate-400 transition-all shadow-sm"
-                            >
-                               <Trash2 size={16} strokeWidth={3} />
-                            </button>
-                          )}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[900px]">
+                <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
+                  <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
+                    <th className="px-6 py-4 w-12"></th>
+                    <th className="px-6 py-4">Test Details</th>
+                    <th className="px-6 py-4">Date</th>
+                    <th className="px-6 py-4 text-center">Questions</th>
+                    <th className="px-6 py-4 text-center">Version</th>
+                    <th className="px-6 py-4 text-center">Status</th>
+                    <th className="px-6 py-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-semibold text-slate-700 text-sm">
+                  {filteredTests.map((test) => {
+                    const isSelected = selectedTestIds.includes(test.id);
+                    return (
+                      <tr 
+                        key={test.id} 
+                        className={cn(
+                          "hover:bg-slate-50/60 transition-colors group cursor-pointer",
+                          isSelected && "bg-blue-50/25",
+                          test.status === 'DRAFT' && "bg-amber-50/5 hover:bg-amber-50/15"
+                        )}
+                        onClick={() => {
+                          if (test.status === 'DRAFT') {
+                            startEditing(test);
+                            setStep(test.answerKey && Object.keys(test.answerKey).length > 0 ? 3 : 1);
+                          } else {
+                            setSelectedTest(test);
+                            setView('detail');
+                          }
+                        }}
+                      >
+                        <td className="px-6 py-4 w-12" onClick={(e) => e.stopPropagation()}>
+                          <input 
+                            type="checkbox"
+                            className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer bg-white"
+                            checked={isSelected}
+                            onChange={() => {
+                              setSelectedTestIds(prev => 
+                                prev.includes(test.id) ? prev.filter(id => id !== test.id) : [...prev, test.id]
+                              );
+                            }}
+                          />
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors leading-snug">{test.name}</span>
+                            <span className="text-[10px] font-mono text-slate-450 mt-0.5">ID: {test.id}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-[11px] font-mono font-black text-slate-500 uppercase tracking-widest">{test.date}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="text-sm font-black text-slate-800">{test.totalQuestions}</span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded-lg text-slate-500 uppercase tracking-widest">
+                            v{test.answerKeyVersion || 1}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-center">
                           <Badge variant={test.status === 'DRAFT' ? 'amber' : (test.isActive ? 'green' : 'slate')}>
                             {test.status === 'DRAFT' ? 'Draft' : (test.isActive ? 'Active' : 'Archived')}
-                         </Badge>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold block w-fit">ID: {test.id}</span>
-                      <h4 className="font-black text-slate-900 tracking-tight text-lg line-clamp-2">{test.name}</h4>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{test.date}</p>
-                    </div>
-                  </div>
-                  <div className="mt-6 pt-6 border-t border-slate-50 flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-2xl font-black text-slate-900">{test.totalQuestions}</span>
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Questions</span>
-                    </div>
-                    <div className="text-right">
-                       <span className="text-[10px] font-black bg-slate-100 px-2 py-1 rounded-lg text-slate-500 uppercase tracking-widest">
-                         v{test.answerKeyVersion || 1}
-                       </span>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-            ))
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex items-center justify-end gap-2">
+                            <button 
+                               onClick={() => {
+                                  startEditing(test);
+                               }}
+                               className="p-2 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-xl text-slate-450 hover:text-white transition-all shadow-sm"
+                               title="Edit Answer Key"
+                            >
+                               <Pencil size={15} strokeWidth={3} />
+                            </button>
+                            {isAdmin && (
+                              <button 
+                                onClick={() => {
+                                   handleDeleteTest(test.id);
+                                }}
+                                className="p-2 bg-slate-100 hover:bg-rose-600 hover:text-white rounded-xl text-slate-450 hover:text-white transition-all shadow-sm"
+                                title="Delete Test"
+                              >
+                                 <Trash2 size={15} strokeWidth={3} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       </div>

@@ -1159,31 +1159,31 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
   );
 }
 
+const findBatchSafely = (idOrCode: string, list: any[]) => {
+  if (!idOrCode) return null;
+  const clean = String(idOrCode).trim().toLowerCase();
+  return list.find(b => b.id === idOrCode) ||
+         list.find(b => String(b.batchCode || '').trim().toLowerCase() === clean) ||
+         list.find(b => String(b.batchName || '').trim().toLowerCase() === clean);
+};
+
+const findCenterSafely = (idOrCode: string, list: any[]) => {
+  if (!idOrCode) return null;
+  const clean = String(idOrCode).trim().toLowerCase();
+  return list.find(c => c.id === idOrCode) ||
+         list.find(c => String(c.centerName || '').trim().toLowerCase() === clean);
+};
+
+const findProgramSafely = (idOrCode: string, list: any[]) => {
+  if (!idOrCode) return null;
+  const clean = String(idOrCode).trim().toLowerCase();
+  return list.find(p => p.id === idOrCode) ||
+         list.find(p => String(p.programName || '').trim().toLowerCase() === clean);
+};
+
 export default function Results() {
   const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
-
-  const findBatchSafely = (idOrCode: string, list: any[]) => {
-    if (!idOrCode) return null;
-    const clean = String(idOrCode).trim().toLowerCase();
-    return list.find(b => b.id === idOrCode) ||
-           list.find(b => String(b.batchCode || '').trim().toLowerCase() === clean) ||
-           list.find(b => String(b.batchName || '').trim().toLowerCase() === clean);
-  };
-
-  const findCenterSafely = (idOrCode: string, list: any[]) => {
-    if (!idOrCode) return null;
-    const clean = String(idOrCode).trim().toLowerCase();
-    return list.find(c => c.id === idOrCode) ||
-           list.find(c => String(c.centerName || '').trim().toLowerCase() === clean);
-  };
-
-  const findProgramSafely = (idOrCode: string, list: any[]) => {
-    if (!idOrCode) return null;
-    const clean = String(idOrCode).trim().toLowerCase();
-    return list.find(p => p.id === idOrCode) ||
-           list.find(p => String(p.programName || '').trim().toLowerCase() === clean);
-  };
 
   const isAdmin = role === 'admin';
   const canEdit = role === 'admin';
@@ -1208,6 +1208,7 @@ export default function Results() {
   const [isAdvancedFilterOpen, setIsAdvancedFilterOpen] = useState(false);
   const [tests, setTests] = useState<any[]>([]);
   const [selectedTestIds, setSelectedTestIds] = useState<string[]>([]);
+  const [globalTestIds, setGlobalTestIds] = useState<string[]>([]);
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedResult, setSelectedResult] = useState<any>(null);
@@ -1235,9 +1236,10 @@ export default function Results() {
 
   useEffect(() => {
     if (role === 'center' || role === 'center_level') {
-      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
-        if (filters.centerId !== centerId) {
-          setFilters(f => ({ ...f, centerId }));
+      if (centerId && centerId !== 'all') {
+        const allowed = centerId.split(',').map(id => id.trim()).filter(Boolean);
+        if (allowed.length > 0 && !filters.centerId) {
+          setFilters(f => ({ ...f, centerId: allowed[0] }));
         }
       }
     } else if (role === 'teacher') {
@@ -1251,6 +1253,7 @@ export default function Results() {
 
   const [wizardProgramId, setWizardProgramId] = useState('');
   const [wizardBatchId, setWizardBatchId] = useState('');
+  const [wizardDate, setWizardDate] = useState('');
   const [testSearchQuery, setTestSearchQuery] = useState('');
 
   const wizardFilteredBatches = useMemo(() => {
@@ -1258,14 +1261,33 @@ export default function Results() {
     return metaBatches.filter(b => b.programId === wizardProgramId && b.isActive);
   }, [wizardProgramId, metaBatches]);
 
+  const uniqueTestDatesVec = useMemo(() => {
+    const dates = tests.map(t => t.date).filter(Boolean);
+    const uniqueDates = Array.from(new Set(dates)).sort((a, b) => b.localeCompare(a));
+    return uniqueDates.map(d => {
+      const testsOnDate = tests.filter(t => t.date === d);
+      const programIds = Array.from(new Set(testsOnDate.map(t => t.programId).filter(Boolean)));
+      const programNames = programIds.map(pid => {
+        const prog = metaPrograms.find((p: any) => p.id === pid);
+        return prog ? prog.programName : '';
+      }).filter(Boolean);
+      const programsLabel = programNames.length > 0 ? ` (${programNames.join(', ')})` : '';
+      return {
+        date: d,
+        label: `${d}${programsLabel}`
+      };
+    });
+  }, [tests, metaPrograms]);
+
   const wizardFilteredTests = useMemo(() => {
     return tests.filter(t => {
       const matchesProg = !wizardProgramId || t.programId === wizardProgramId;
       const matchesBatch = !wizardBatchId || t.batchIds?.includes(wizardBatchId);
       const matchesSearch = !testSearchQuery || t.name?.toLowerCase().includes(testSearchQuery.toLowerCase()) || String(t.pattern || '').toLowerCase().includes(testSearchQuery.toLowerCase());
-      return matchesProg && matchesBatch && matchesSearch;
+      const matchesDate = !wizardDate || t.date === wizardDate;
+      return matchesProg && matchesBatch && matchesSearch && matchesDate;
     });
-  }, [wizardProgramId, wizardBatchId, testSearchQuery, tests]);
+  }, [wizardProgramId, wizardBatchId, testSearchQuery, wizardDate, tests]);
 
   const sortedResults = useMemo(() => {
     // Standardize results into map format for easiest UI consumption
@@ -1290,8 +1312,24 @@ export default function Results() {
       };
     }).filter(r => {
       if ((role === 'center' || role === 'center_level') && centerId !== 'all') {
-        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
-        if (!allowedCenters.includes(r.centerId)) {
+        const allowedCentersSet = (() => {
+          const ids = centerId ? centerId.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+          const set = new Set(ids);
+          ids.forEach(id => {
+            const match = metaCenters.find(c => 
+              String(c.id).trim().toLowerCase() === id || 
+              String(c.centerName || '').trim().toLowerCase() === id
+            );
+            if (match) {
+              set.add(String(match.id).trim().toLowerCase());
+              set.add(String(match.centerName || '').trim().toLowerCase());
+            }
+          });
+          return set;
+        })();
+        const rCenterIdLower = String(r.centerId || '').trim().toLowerCase();
+        const rCenterNameLower = String(r.centerName || '').trim().toLowerCase();
+        if (!allowedCentersSet.has(rCenterIdLower) && !allowedCentersSet.has(rCenterNameLower)) {
           return false;
         }
       }
@@ -2034,8 +2072,11 @@ export default function Results() {
           
           return {
             ...res,
-            batchName: batchDetail?.batchName || res.batchName,
+            centerId: centerDetail?.id || res.centerId,
             centerName: centerDetail?.centerName || res.centerName,
+            batchId: batchDetail?.id || res.batchId,
+            batchName: batchDetail?.batchName || res.batchName,
+            programId: programDetail?.id || res.programId,
             programName: programDetail?.programName || res.programName,
           };
         }
@@ -2171,7 +2212,7 @@ export default function Results() {
   }
 
   return (
-    <div className="max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative">
+    <div className="w-full p-6 md:p-10 space-y-10 relative">
       {(loading || isReevaluating) && (
         <Loader fullScreen label={isReevaluating ? "Recalculating Scores..." : "Loading Data..."} />
       )}
@@ -2181,7 +2222,10 @@ export default function Results() {
           {(role === 'admin' || role === 'central' || role === 'center' || role === 'teacher' || role === 'central_team') && (
             <div className="flex bg-slate-100 p-1.5 rounded-2xl w-fit">
               <button
-                onClick={() => setView('table')}
+                onClick={() => {
+                  setView('table');
+                  fetchResults(selectedTestIds);
+                }}
                 className={cn(
                   "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
                   view === 'table' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -2191,12 +2235,10 @@ export default function Results() {
               </button>
               <button
                 onClick={() => {
-                  if (selectedTestIds.length === 0) {
-                    const allIds = tests.map(t => t.id);
-                    setSelectedTestIds(allIds);
-                    fetchResults(allIds);
-                  }
+                  const ids = tests.map(t => t.id);
+                  setGlobalTestIds(ids);
                   setView('analytics');
+                  fetchResults(ids);
                 }}
                 className={cn(
                   "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
@@ -2346,11 +2388,15 @@ export default function Results() {
           results={results} 
           tests={tests} 
           onBack={() => setView('table')} 
-          selectedTestIds={selectedTestIds}
+          selectedTestIds={globalTestIds}
           initialSearch={searchTerm}
-          onTestToggle={handleTestToggle}
+          onTestToggle={(tId) => {
+            const next = globalTestIds.includes(tId) ? globalTestIds.filter(id => id !== tId) : [...globalTestIds, tId];
+            setGlobalTestIds(next);
+            fetchResults(next);
+          }}
           onSelectAllTests={(allIds) => {
-            setSelectedTestIds(allIds);
+            setGlobalTestIds(allIds);
             fetchResults(allIds);
           }}
           onSelectResult={(res) => {
@@ -2503,9 +2549,9 @@ export default function Results() {
           <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
           <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
             <table className="w-full text-left border-collapse min-w-[1200px]">
-              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
+              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-30 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
-                  <th className="px-6 py-5 w-10 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">
+                  <th className="px-6 py-5 w-12 sticky top-0 left-0 bg-slate-50/95 backdrop-blur-md z-35 border-b border-slate-100">
                     <input 
                       type="checkbox" 
                       className="rounded border-slate-300"
@@ -2520,7 +2566,7 @@ export default function Results() {
                     />
                   </th>
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
+                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-12 bg-slate-50/95 backdrop-blur-md z-35 min-w-[220px] max-w-[220px] border-b border-slate-100"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'studentName' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'studentName', direction: dir });
@@ -2528,10 +2574,9 @@ export default function Results() {
                   >
                     Student {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Program & Center</th>
-                  <th className="px-6 py-5 sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Mode</th>
-                  <th 
-                    className="px-6 py-5 text-center bg-blue-50/30 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-blue-50/95 backdrop-blur-md z-20"
+                  <th className="px-6 py-5 sticky top-0 left-[268px] bg-slate-50/95 backdrop-blur-md z-35 min-w-[200px] max-w-[200px] border-b border-slate-100">Program & Center</th>
+                  <th className="px-6 py-5 sticky top-0 left-[468px] bg-slate-50/95 backdrop-blur-md z-35 w-20 border-b border-slate-100">Mode</th>
+                  <th className="px-6 py-5 text-center bg-blue-50/35 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-[548px] bg-blue-50/95 backdrop-blur-md z-35 w-24 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'score' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'score', direction: dir });
@@ -2575,7 +2620,7 @@ export default function Results() {
                   
                   return (
                     <tr key={res.id} className={cn("group hover:bg-slate-50/80 transition-colors", selectedResultIds.includes(res.id) && "bg-blue-50/50")}>
-                      <td className="px-6 py-5">
+                      <td className="px-6 py-5 sticky left-0 bg-white group-hover:bg-slate-50/90 transition-colors z-10 border-b border-slate-100">
                         <input 
                           type="checkbox" 
                           className="rounded border-slate-300"
@@ -2591,7 +2636,7 @@ export default function Results() {
                       </td>
                       {/* Col A: Student Info */}
                       <td 
-                        className="px-6 py-5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors"
+                        className="px-6 py-5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors sticky left-12 bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[220px] max-w-[220px] border-b border-slate-100"
                         onClick={() => {
                           setSelectedResult(res); 
                           setDetailBackView('table');
@@ -2606,7 +2651,7 @@ export default function Results() {
                         </div>
                       </td>
                       {/* Col B: Student Details */}
-                      <td className="px-6 py-5">
+                      <td className="px-6 py-5 sticky left-[268px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[200px] max-w-[200px] border-b border-slate-100">
                         <div className="flex flex-col gap-1 justify-start items-start">
                           {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
                           <div className="text-xs font-black text-slate-900 leading-normal">
@@ -2622,12 +2667,12 @@ export default function Results() {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-5">
+                      <td className="px-6 py-5 sticky left-[468px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 w-20 border-b border-slate-100">
                         <Badge variant={res.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] uppercase">
                           {res.testMode || 'offline'}
                         </Badge>
                       </td>
-                      <td className="px-6 py-5 text-center bg-blue-50/10 whitespace-nowrap">
+                      <td className="px-6 py-5 text-center bg-blue-50/10 whitespace-nowrap sticky left-[548px] group-hover:bg-blue-50/20 transition-colors z-10 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] w-24">
                         <div className="flex flex-col items-center justify-center">
                           <span className="text-xl font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
                           {!res.isAbsent && (
@@ -2749,109 +2794,126 @@ export default function Results() {
            </div>
 
            {/* Filter controls */}
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="relative group">
-                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={16} />
-                 <Input 
-                    type="text"
-                    placeholder="Search test by name or pattern..." 
-                    value={testSearchQuery}
-                    onChange={e => setTestSearchQuery(e.target.value)}
-                    className="pl-11 rounded-2xl border-slate-100 bg-slate-50 focus:bg-white text-sm font-bold h-12"
-                 />
-              </div>
+            <div className="flex flex-col md:flex-row flex-wrap items-center gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-100 max-w-5xl text-xs font-semibold">
+               <div className="relative group flex-1 w-full md:w-auto">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={12} />
+                  <Input 
+                     type="text"
+                     placeholder="Search test..." 
+                     value={testSearchQuery}
+                     onChange={e => setTestSearchQuery(e.target.value)}
+                     className="pl-8 rounded-xl border-slate-100 bg-slate-50 focus:bg-white text-[11px] h-9"
+                  />
+               </div>
 
-              <div>
-                 <Select 
-                    value={wizardProgramId} 
-                    onChange={e => {
-                       setWizardProgramId(e.target.value);
-                       setWizardBatchId(''); // reset batch when program changes
-                    }}
-                    className="rounded-2xl border-slate-100 bg-slate-50 text-sm font-bold h-12 w-full"
-                 >
-                    <option value="">All Divisions (Programs)</option>
-                    {metaPrograms.map(p => (
-                       <option key={p.id} value={p.id}>{p.programName}</option>
-                    ))}
-                 </Select>
-              </div>
+               <div className="w-full md:w-auto md:min-w-[170px]">
+                  <Select 
+                     value={wizardProgramId} 
+                     onChange={e => {
+                        setWizardProgramId(e.target.value);
+                        setWizardBatchId(''); // reset batch when program changes
+                     }}
+                     className="rounded-xl border-slate-100 bg-slate-50 text-[11px] h-9 w-full py-1 px-2.5 font-bold text-slate-600 focus:outline-none"
+                  >
+                     <option value="">All Programs</option>
+                     {metaPrograms.map(p => (
+                        <option key={p.id} value={p.id}>{p.programName}</option>
+                     ))}
+                  </Select>
+               </div>
 
-              <div>
-                 <Select 
-                    value={wizardBatchId} 
-                    onChange={e => setWizardBatchId(e.target.value)}
-                    className="rounded-2xl border-slate-100 bg-slate-50 text-sm font-bold h-12 w-full"
-                 >
-                    <option value="">All Class Batches</option>
-                    {wizardFilteredBatches.map(b => (
-                       <option key={b.id} value={b.id}>{b.batchName}</option>
-                    ))}
-                 </Select>
-              </div>
-           </div>
+               <div className="w-full md:w-auto md:min-w-[150px]">
+                  <Select 
+                     value={wizardBatchId} 
+                     onChange={e => setWizardBatchId(e.target.value)}
+                     className="rounded-xl border-slate-100 bg-slate-50 text-[11px] h-9 w-full py-1 px-2.5 font-bold text-slate-600 focus:outline-none"
+                  >
+                     <option value="">All Batches</option>
+                     {wizardFilteredBatches.map(b => (
+                        <option key={b.id} value={b.id}>{b.batchName}</option>
+                     ))}
+                  </Select>
+               </div>
 
-           {/* Tests Grid */}
-           <div className="space-y-6">
-              {wizardFilteredTests.length > 0 ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-h-[60vh] overflow-y-auto pr-2 no-scrollbar">
-                    {wizardFilteredTests.map((t: any) => {
-                       const isSelected = selectedTestIds.includes(t.id);
-                       return (
-                          <button
-                             key={t.id}
-                             onClick={() => {
-                                handleTestToggle(t.id);
-                             }}
-                             className={cn(
-                                "group text-left p-6 rounded-[2rem] border-2 transition-all outline-none flex flex-col justify-between h-48 relative overflow-hidden",
-                                isSelected 
-                                   ? "border-blue-600 bg-blue-50/20 ring-4 ring-blue-50/50" 
-                                   : "border-slate-100 hover:border-blue-400 hover:bg-blue-50/10 bg-white"
-                             )}
-                          >
-                             <div className="flex items-center justify-between w-full">
-                                <div className={cn(
-                                   "w-12 h-12 rounded-2xl flex items-center justify-center transition-colors duration-300",
-                                   isSelected ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-600 group-hover:bg-blue-600 group-hover:text-white"
-                                )}>
-                                   <Award size={22} strokeWidth={2.5} />
-                                </div>
-                                {isSelected ? (
-                                   <CheckCircle2 size={24} className="text-blue-600 fill-blue-50 animate-bounce-short" strokeWidth={2.5} />
-                                ) : (
-                                   <div className="w-6 h-6 rounded-full border border-slate-200 flex items-center justify-center group-hover:border-blue-400 transition-colors">
-                                      <div className="w-2.5 h-2.5 rounded-full bg-transparent group-hover:bg-blue-100 transition-colors" />
-                                   </div>
-                                )}
-                             </div>
-                             <div>
-                                <h4 className="font-black text-slate-900 group-hover:text-blue-700 transition-colors leading-tight line-clamp-2">
-                                   {t.name}
-                                </h4>
-                                <div className="flex flex-wrap items-center gap-2 mt-2">
-                                   <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest bg-slate-100/60 px-2 py-1 rounded-lg">
-                                      {t.date}
-                                   </span>
-                                   <span className="text-[10px] font-mono px-2 py-1 rounded-lg bg-slate-100 text-slate-600 font-bold" title="Test ID">ID: {t.id}</span>
-                                   <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded-lg">
-                                      {t.pattern?.replace('_', ' ')}
-                                   </span>
-                                   {t.programId && (() => {
-                                      const prog = metaPrograms.find((p: any) => p.id === t.programId);
-                                      return prog ? (
-                                        <span className="text-[10px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 px-2 py-1 rounded-lg">
-                                           {prog.programName}
-                                        </span>
-                                      ) : null;
-                                   })()}
-                                </div>
-                             </div>
-                          </button>
-                       );
-                    })}
-                 </div>
-              ) : (
+               <div className="w-full md:w-auto md:min-w-[180px]">
+                  <Select 
+                     value={wizardDate} 
+                     onChange={e => setWizardDate(e.target.value)}
+                     className="rounded-xl border-slate-100 bg-slate-50 text-[11px] h-9 w-full py-1 px-2.5 font-bold text-slate-600 focus:outline-none"
+                  >
+                     <option value="">All Test Dates</option>
+                     {uniqueTestDatesVec.map(item => (
+                        <option key={item.date} value={item.date}>{item.label}</option>
+                     ))}
+                  </Select>
+               </div>
+            </div>
+
+            {/* Tests Grid */}
+            <div className="space-y-6">
+               {wizardFilteredTests.length > 0 ? (
+                  <div className="bg-white border border-slate-150 rounded-[2.5rem] overflow-hidden shadow-sm overflow-y-auto pr-2 no-scrollbar" style={{ maxHeight: '55vh' }}>
+                     <table className="w-full text-left border-collapse min-w-[700px]">
+                        <thead className="bg-slate-50 text-slate-500 border-b border-slate-100 sticky top-0 z-10">
+                           <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
+                              <th className="px-6 py-4 w-12"></th>
+                              <th className="px-6 py-4">Test Details</th>
+                              <th className="px-6 py-4">Date</th>
+                              <th className="px-6 py-4 text-center">Pattern</th>
+                              <th className="px-6 py-4 text-right">Academic Program</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-semibold text-slate-700 text-sm">
+                           {wizardFilteredTests.map((t) => {
+                              const isSelected = selectedTestIds.includes(t.id);
+                              const prog = metaPrograms.find((p) => p.id === t.programId);
+                              return (
+                                 <tr 
+                                    key={t.id}
+                                    onClick={() => handleTestToggle(t.id)}
+                                    className={cn(
+                                       "hover:bg-slate-50/80 cursor-pointer group transition-colors",
+                                       isSelected && "bg-blue-50/20"
+                                    )}
+                                 >
+                                    <td className="px-6 py-4 w-12" onClick={(e) => e.stopPropagation()}>
+                                       <input 
+                                          type="checkbox"
+                                          className="w-5 h-5 rounded-lg border-2 border-slate-200 text-blue-600 focus:ring-blue-500 cursor-pointer bg-white"
+                                          checked={isSelected}
+                                          onChange={() => handleTestToggle(t.id)}
+                                       />
+                                    </td>
+                                    <td className="px-6 py-4">
+                                       <div className="flex flex-col">
+                                          <span className="font-extrabold text-slate-900 group-hover:text-blue-600 transition-colors">{t.name}</span>
+                                          <span className="text-[10px] font-mono text-slate-400">ID: {t.id}</span>
+                                       </div>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                       <span className="text-[11px] font-mono font-black text-slate-500 uppercase tracking-widest">{t.date}</span>
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                       <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest bg-indigo-50 px-2.5 py-1 rounded-lg">
+                                          {t.pattern?.replace('_', ' ')}
+                                       </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                       {prog ? (
+                                          <span className="text-[10px] text-emerald-600 font-black uppercase tracking-widest bg-emerald-50 px-2.5 py-1 rounded-lg">
+                                             {prog.programName}
+                                          </span>
+                                       ) : (
+                                          <span className="text-xs text-slate-400 italic">No assigned program</span>
+                                       )}
+                                    </td>
+                                 </tr>
+                              );
+                           })}
+                        </tbody>
+                     </table>
+                  </div>
+               ) : (
                  <div className="py-16 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 text-center space-y-4">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-400">
                        <BarChart3 size={24} />
@@ -2860,11 +2922,11 @@ export default function Results() {
                        <p className="text-slate-800 font-black text-lg">No matching test records found</p>
                        <p className="text-sm text-slate-400 font-bold">Try clearing filters or adjusting your search keywords.</p>
                     </div>
-                    {(wizardProgramId || wizardBatchId || testSearchQuery) && (
+                    {(wizardProgramId || wizardBatchId || wizardDate || testSearchQuery) && (
                        <Button 
                           variant="outline" 
                           size="sm" 
-                          onClick={() => { setWizardProgramId(''); setWizardBatchId(''); setTestSearchQuery(''); }} 
+                          onClick={() => { setWizardProgramId(''); setWizardBatchId(''); setWizardDate(''); setTestSearchQuery(''); }} 
                           className="border-slate-200"
                        >
                           Reset Filters
@@ -2995,11 +3057,15 @@ export default function Results() {
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Center</label>
                   {(role === 'center' || role === 'center_level') ? (
                     <Select 
-                      value={centerId || ''} 
-                      disabled
+                      value={filters.centerId} 
+                      onChange={e => setFilters({...filters, centerId: e.target.value, batchId: ''})}
                       className="rounded-2xl border-slate-100 font-bold"
                     >
-                      {masters.centers.filter((c: any) => c.id === centerId).map((c: any) => (
+                      {centerId && centerId !== 'all' && centerId.includes(',') && <option value="">All My Centers</option>}
+                      {masters.centers.filter((c: any) => {
+                        const allowed = centerId ? centerId.split(',').map((id) => id.trim().toLowerCase()).filter(Boolean) : [];
+                        return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
+                      }).map((c: any) => (
                         <option key={c.id} value={c.id}>{c.centerName}</option>
                       ))}
                     </Select>
@@ -3528,7 +3594,11 @@ export default function Results() {
                   className="font-bold border-slate-100 rounded-2xl"
                 >
                   <option value="">Select Test...</option>
-                  {tests.map(t => <option key={t.id} value={t.id}>{t.name} ({t.date})</option>)}
+                  {tests.map(t => {
+                    const prog = metaPrograms.find((p: any) => p.id === t.programId);
+                    const progLabel = prog ? ` | Program: ${prog.programName}` : '';
+                    return <option key={t.id} value={t.id}>{t.name} ({t.date}{progLabel})</option>;
+                  })}
                 </Select>
               </div>
 
@@ -3645,6 +3715,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   hideHeader?: boolean
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
+  const { role, centerId, batchIds } = useAuth();
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
   const [selectedCompStudentReg, setSelectedCompStudentReg] = useState<string>('');
   const [compHistory, setCompHistory] = useState<any[]>([]);
@@ -3662,6 +3733,15 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [selectedProgramId, setSelectedProgramId] = useState<string>('');
   const [selectedCenterId, setSelectedCenterId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+
+  useEffect(() => {
+    if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
+      const allowed = centerId.split(',').map(id => id.trim()).filter(Boolean);
+      if (allowed.length > 0 && !selectedCenterId) {
+        setSelectedCenterId(allowed[0]);
+      }
+    }
+  }, [role, centerId, selectedCenterId]);
 
   useEffect(() => {
     if (initialSearch) {
@@ -3848,9 +3928,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         if (ev.status === 'correct') difficulties[dName].totalCorrect++;
 
         // Question-wise Summary
-        const qKey = `${ev.testId}_${ev.qIdx}`;
+        const qKey = `${ev.testId || res.testId}_${ev.qIdx}`;
         if (!questionMap[qKey]) {
-          const testObj = tests.find(t => t.id === ev.testId);
+          const testObj = tests.find(t => t.id === (ev.testId || res.testId));
           questionMap[qKey] = { 
             qIdx: ev.qIdx, 
             subject: sName, 
@@ -4170,9 +4250,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           resultsQuery = query(collection(db, 'result_updated'), where('programId', '==', selectedProgramId));
           studentsQuery = query(collection(db, 'students'), where('programId', '==', selectedProgramId));
         } else {
-          // If no filters are chosen, load standard sample to prevent massive collection reads
-          resultsQuery = query(collection(db, 'result_updated'), limit(150));
-          studentsQuery = query(collection(db, 'students'), limit(150));
+          // If center role and no filters chosen, query where centerId is in allowedCenters instead of limit 150 globally
+          const allowedCenters = (role === 'center' || role === 'center_level') && centerId && centerId !== 'all'
+            ? centerId.split(',').map(id => id.trim()).filter(Boolean)
+            : [];
+          if (allowedCenters.length > 0) {
+            resultsQuery = query(collection(db, 'result_updated'), where('centerId', 'in', allowedCenters));
+            studentsQuery = query(collection(db, 'students'), where('centerId', 'in', allowedCenters));
+          } else {
+            // If no filters are chosen, load standard sample to prevent massive collection reads
+            resultsQuery = query(collection(db, 'result_updated'), limit(150));
+            studentsQuery = query(collection(db, 'students'), limit(150));
+          }
         }
 
         const [resultsSnap, studentsSnap] = await Promise.all([
@@ -4209,7 +4298,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               targetYear: studentInfo.targetYear || '',
             };
           } else {
-            return res;
+            const batchDetail = findBatchSafely(res.batchId, metaBatches);
+            const centerDetail = findCenterSafely(res.centerId, metaCenters);
+            const programDetail = findProgramSafely(res.programId, metaPrograms);
+            return {
+              ...res,
+              centerId: centerDetail?.id || res.centerId,
+              centerName: centerDetail?.centerName || res.centerName,
+              batchId: batchDetail?.id || res.batchId,
+              batchName: batchDetail?.batchName || res.batchName,
+              programId: programDetail?.id || res.programId,
+              programName: programDetail?.programName || res.programName,
+            };
           }
         });
 
@@ -4530,29 +4630,113 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   );
 
   const handleExportGlobal = () => {
-    if (aggregateStats.studentTable.length === 0) {
-      toast.error('No analysis data to export');
+    let exportData: any[] = [];
+    let filename = `Global_Analysis_${new Date().getTime()}.csv`;
+
+    if (activeAnalysisView === 'summary') {
+      // Export Subject Stats and Chapter Stats
+      exportData = Object.entries(aggregateStats.subjects).map(([name, s]: any) => {
+        const accuracy = s.totalQuestions > 0 ? Math.round((s.totalCorrect / s.totalQuestions) * 100) : 0;
+        return {
+          'Type': 'Subject',
+          'Field/Name': name,
+          'Total Questions': s.totalQuestions,
+          'Total Correct': s.totalCorrect,
+          'Accuracy %': `${accuracy}%`
+        };
+      });
+      // Append Chapter Stats
+      Object.entries(aggregateStats.chapters).forEach(([name, c]: any) => {
+        const accuracy = c.totalQuestions > 0 ? Math.round((c.totalCorrect / c.totalQuestions) * 100) : 0;
+        exportData.push({
+          'Type': `Chapter (${c.subject})`,
+          'Field/Name': name,
+          'Total Questions': c.totalQuestions,
+          'Total Correct': c.totalCorrect,
+          'Accuracy %': `${accuracy}%`
+        });
+      });
+      filename = `Subject_Chapter_Performance_${new Date().getTime()}.csv`;
+    } 
+    else if (activeAnalysisView === 'question') {
+      const qList = aggregateStats.questions.filter((q: any) => {
+        if (questionTestFilter !== 'All' && q.testName !== questionTestFilter) return false;
+        if (questionDateFilter !== 'All' && q.testDate !== questionDateFilter) return false;
+        if (questionProgramFilter !== 'All' && q.programName !== questionProgramFilter) return false;
+        return true;
+      });
+
+      exportData = qList.map((q: any) => {
+        const total = q.correct + q.incorrect + q.unattempted;
+        const accuracy = (q.correct + q.incorrect) > 0 ? Math.round((q.correct / (q.correct + q.incorrect)) * 100) : 0;
+        return {
+          'Question Code': `Q-${q.qIdx}`,
+          'Test Name': q.testName,
+          'Test Date': q.testDate,
+          'Program': q.programName,
+          'Subject': q.subject,
+          'Chapter': q.chapter,
+          'Topic': q.topic,
+          'Correct Graders (Count)': q.correct,
+          'Wrong Graders (Count)': q.incorrect,
+          'Unattempted (Count)': q.unattempted,
+          'Total Graders': total,
+          'Accuracy %': `${accuracy}%`
+        };
+      });
+      filename = `Question_Wise_Performance_${new Date().getTime()}.csv`;
+    } 
+    else if (activeAnalysisView === 'topic') {
+      exportData = aggregateStats.topicTable.map((t: any) => {
+        return {
+          'Topic Name': t.topic,
+          'Subject Name': t.subject,
+          'Chapter Name': t.chapter,
+          'Questions Contributed': t.questionsCount,
+          'Total Attempts (Students)': t.totalAttempts,
+          'Total Correct Answers': t.correct,
+          'Total Wrong Answers': t.incorrect,
+          'Total Unattempted': t.unattempted,
+          'Accuracy %': `${t.accuracy}%`
+        };
+      });
+      filename = `Topic_Wise_Performance_${new Date().getTime()}.csv`;
+    } 
+    else if (activeAnalysisView === 'comparison') {
+      handleExportComparisonCSV();
       return;
+    } 
+    else {
+      // Default to Leaderboard (Student table) Export
+      if (aggregateStats.studentTable.length === 0) {
+        toast.error('No analysis data to export');
+        return;
+      }
+      exportData = aggregateStats.studentTable.map((s: any) => ({
+        'Reg No': s.regNo,
+        'Student Name': s.studentName,
+        'Tests Taken': s.testsTaken,
+        'Total Score': s.totalScore,
+        'Avg Score': s.avgScore,
+        'Total Correct': s.totalCorrect,
+        'Total Wrong': s.totalWrong,
+        'Total Blank': s.totalBlank,
+        'Accuracy %': `${s.accuracy}%`
+      }));
+      filename = `Leaderboard_Performance_${new Date().getTime()}.csv`;
     }
 
-    const exportData = aggregateStats.studentTable.map((s: any) => ({
-      'Reg No': s.regNo,
-      'Student Name': s.studentName,
-      'Tests Taken': s.testsTaken,
-      'Total Score': s.totalScore,
-      'Avg Score': s.avgScore,
-      'Total Correct': s.totalCorrect,
-      'Total Wrong': s.totalWrong,
-      'Total Blank': s.totalBlank,
-      'Accuracy %': `${s.accuracy}%`
-    }));
+    if (exportData.length === 0) {
+      toast.error('No results matched current filters to export');
+      return;
+    }
 
     const csv = Papa.unparse(exportData);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `Global_Analysis_${new Date().getTime()}.csv`);
+    link.setAttribute('download', filename);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -4703,7 +4887,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   };
 
   return (
-    <div className={cn(hideHeader ? "space-y-10 relative" : "max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative")}>
+    <div className={cn(hideHeader ? "space-y-10 relative" : "w-full p-6 md:p-10 space-y-10 relative")}>
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         {!hideHeader ? (
           <div className="flex items-center gap-6">
@@ -4978,9 +5162,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                      className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
                    >
                      <option value="">All Centers</option>
-                     {metaCenters.filter((c: any) => c.isActive).map((c: any) => (
-                       <option key={c.id} value={c.id}>{c.centerName}</option>
-                     ))}
+                     {metaCenters.filter((c: any) => {
+                        if (!c.isActive) return false;
+                        if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
+                          const allowed = centerId.split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
+                          return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
+                        }
+                        return true;
+                      }).map((c: any) => (
+                        <option key={c.id} value={c.id}>{c.centerName}</option>
+                      ))}
                    </Select>
                  </div>
 
@@ -6872,15 +7063,45 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
         );
         const snap = await getDocs(q);
         const attemptsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+        const attemptsWithRanks = await Promise.all(
+          attemptsData.map(async (attempt: any) => {
+            if (attempt.isAbsent) {
+              return { ...attempt, rank: '—' };
+            }
+            try {
+              const testId = attempt.testId;
+              if (!testId) return attempt;
+
+              const qResults = query(
+                collection(db, 'result_updated'),
+                where('testId', '==', testId)
+              );
+              const resultSnap = await getDocs(qResults);
+              const testGroup = resultSnap.docs.map(doc => doc.data() as any);
+
+              const activeGroup = testGroup.filter((r: any) => !r.isAbsent);
+              const studentScore = attempt.score !== undefined ? attempt.score : 0;
+              const higherCount = activeGroup.filter((r: any) => (r.score || 0) > studentScore).length;
+              const computedRank = higherCount + 1;
+
+              return { ...attempt, rank: computedRank };
+            } catch (err) {
+              console.error("Error fetching rank for attempt: ", attempt.id, err);
+              return attempt;
+            }
+          })
+        );
+
         // Sort attempts newest first based on test date
-        attemptsData.sort((a: any, b: any) => {
+        attemptsWithRanks.sort((a: any, b: any) => {
           const testA = tests.find((t: any) => t.id === a.testId);
           const testB = tests.find((t: any) => t.id === b.testId);
           const dateA = testA?.date || a.testDate || a.date || '';
           const dateB = testB?.date || b.testDate || b.date || '';
           return dateB.localeCompare(dateA);
         });
-        setAllAttempts(attemptsData);
+        setAllAttempts(attemptsWithRanks);
       } catch (err) {
         console.error("Failed to fetch student attempts:", err);
       } finally {
@@ -7227,7 +7448,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto p-6 md:p-10 space-y-10 relative print:p-0 print:m-0 print:space-y-6">
+    <div className="w-full p-6 md:p-10 space-y-10 relative print:p-0 print:m-0 print:space-y-6">
       {/* Printable Scorecard Brand Header */}
       <div className="hidden print:flex items-center justify-between border-b pb-4 mb-2 border-slate-200">
         <div className="space-y-1 text-left">
@@ -7584,13 +7805,26 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
                           )}
                         </div>
                         {!attempt.isAbsent && (
-                          <div className={cn(
-                            "px-2 py-0.5 rounded-lg text-[9px] font-black",
-                            isCurrent 
-                              ? "bg-white/10 text-white" 
-                              : "bg-slate-100 text-slate-700"
-                          )}>
-                            Rank #{attempt.rank || '—'}
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={cn(
+                              "px-2.5 py-1 rounded-[0.5rem] text-[9px] font-black leading-none",
+                              isCurrent 
+                                ? "bg-white/10 text-white" 
+                                : "bg-slate-150 text-slate-700 border border-slate-200"
+                            )}>
+                              Rank: {attempt.rank && attempt.rank !== '—' && attempt.rank !== 0 ? `#${attempt.rank}` : '—'}
+                            </span>
+                            <span className={cn(
+                              "text-[8px] font-black tracking-tight uppercase px-1.5 py-0.5 rounded-md leading-none",
+                              isCurrent ? "bg-orange-500/25 text-orange-200" : "bg-amber-50 text-amber-600 border border-amber-100"
+                            )}>
+                              Est: {(() => {
+                                const scoreVal = attempt.score !== undefined ? attempt.score : 0;
+                                const maxVal = Number(tMax) || 360;
+                                const patVal = matchT?.pattern || attempt.testPattern || '';
+                                return determineRankBucket(scoreVal, maxVal, patVal);
+                              })()}
+                            </span>
                           </div>
                         )}
                       </div>

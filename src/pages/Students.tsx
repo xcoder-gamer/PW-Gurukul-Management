@@ -93,6 +93,31 @@ export default function Students() {
   const [search, setSearch] = useState('');
   const { programs, centers, batches } = useMetadata();
 
+  const [filters, setFilters] = useState(() => {
+    let initialCenter = '';
+    let initialBatch = '';
+    if (role === 'center' || role === 'center_level' || role === 'center') {
+      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
+        initialCenter = centerId;
+      }
+    } else if (role === 'teacher') {
+      if (batchIds && batchIds.length > 0) {
+        initialBatch = batchIds[0];
+      }
+    }
+    return {
+      program: '',
+      center: initialCenter,
+      batch: initialBatch,
+      gender: '',
+      type: '',
+      status: '',
+      targetYear: '',
+      rankTarget: '',
+      showInactive: false
+    };
+  });
+
   useEffect(() => {
     if (role === 'center' || role === 'center_level' || role === 'center') {
       if (centerId && centerId !== 'all' && !centerId.includes(',')) {
@@ -108,18 +133,6 @@ export default function Students() {
       }
     }
   }, [role, centerId, batchIds]);
-  
-  const [filters, setFilters] = useState({
-    program: '',
-    center: '',
-    batch: '',
-    gender: '',
-    type: '',
-    status: '',
-    targetYear: '',
-    rankTarget: '',
-    showInactive: false
-  });
 
   const [newStudent, setNewStudent] = useState({
     name: '',
@@ -155,14 +168,18 @@ export default function Students() {
 
     if (forceUpdate) {
       invalidateStudentCache();
-    } else if (lastFetchedTime && (now - lastFetchedTime < CACHE_DURATION)) {
+    } else {
       try {
-        const cached = sessionStorage.getItem(`students_cache_${filterKey}`);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          setStudents(parsed);
-          setLoading(false);
-          return;
+        const cachedTime = sessionStorage.getItem(`students_cache_time_${filterKey}`);
+        const effectiveLastFetched = cachedTime ? Number(cachedTime) : lastFetchedTime;
+        if (effectiveLastFetched && (now - effectiveLastFetched < CACHE_DURATION)) {
+          const cached = sessionStorage.getItem(`students_cache_${filterKey}`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            setStudents(parsed);
+            setLoading(false);
+            return;
+          }
         }
       } catch (e) {
         console.warn("Failed retrieving student cache:", e);
@@ -227,6 +244,7 @@ export default function Students() {
 
       try {
         sessionStorage.setItem(`students_cache_${filterKey}`, JSON.stringify(uniqueStudents));
+        sessionStorage.setItem(`students_cache_time_${filterKey}`, String(now));
         const cachedKeysStr = sessionStorage.getItem('students_cache_keys') || '[]';
         const cachedKeys = JSON.parse(cachedKeysStr);
         if (!cachedKeys.includes(filterKey)) {

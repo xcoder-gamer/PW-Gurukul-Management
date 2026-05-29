@@ -86,7 +86,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
             <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
           </div>
         }>
-          <div className="max-w-[1600px] mx-auto p-4 md:p-6 lg:p-8">
+          <div className="w-full p-4 md:p-6 lg:p-8">
             {children}
           </div>
         </Suspense>
