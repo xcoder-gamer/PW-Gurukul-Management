@@ -25,7 +25,8 @@ import {
   Database,
   Trash2,
   Layout,
-  Activity
+  Activity,
+  Inbox
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BottomSheet } from './Students';
@@ -1989,11 +1990,11 @@ export default function Results() {
     setLoading(true);
     try {
       const allResults: any[] = [];
-      for (const id of testIds) {
-        const q = query(collection(db, 'result_updated'), where('testId', '==', id), orderBy('score', 'desc'));
-        const snap = await getDocs(q);
+      const queries = testIds.map(id => query(collection(db, 'result_updated'), where('testId', '==', id), orderBy('score', 'desc')));
+      const snaps = await Promise.all(queries.map(q => getDocs(q)));
+      snaps.forEach(snap => {
         allResults.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      }
+      });
 
       // Dynamically fetch and merge up-to-date student details to solve any stale/missing mapping issues!
       const uniqueRegNos = Array.from(new Set(allResults.map(r => String(r.regNo || '').trim().toUpperCase()).filter(Boolean)));
@@ -2235,7 +2236,20 @@ export default function Results() {
               </button>
               <button
                 onClick={() => {
-                  const ids = tests.map(t => t.id);
+                  let ids: string[] = [];
+                  if (selectedTestIds && selectedTestIds.length > 0) {
+                    ids = [...selectedTestIds];
+                  } else if (wizardProgramId) {
+                    ids = tests.filter(t => t.programId === wizardProgramId).map(t => t.id);
+                  } else if (metaPrograms && metaPrograms.length > 0) {
+                    const firstProgId = metaPrograms[0].id;
+                    ids = tests.filter(t => t.programId === firstProgId).map(t => t.id);
+                  }
+
+                  if (ids.length === 0) {
+                    ids = tests.slice(0, 5).map(t => t.id);
+                  }
+
                   setGlobalTestIds(ids);
                   setView('analytics');
                   fetchResults(ids);
@@ -3730,7 +3744,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [selectedTestModes, setSelectedTestModes] = useState<string[]>([]);
   const [studentSearch, setStudentSearch] = useState(initialSearch);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]); // Array of sKeys (regNo_name)
-  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
+  const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
+    if (selectedTestIds && selectedTestIds.length > 0 && tests && tests.length > 0) {
+      const sampleTest = tests.find(t => t.id === selectedTestIds[0]);
+      if (sampleTest?.programId) return sampleTest.programId;
+    }
+    if (metaPrograms && metaPrograms.length > 0) {
+      return metaPrograms[0].id;
+    }
+    return '';
+  });
   const [selectedCenterId, setSelectedCenterId] = useState<string>('');
   const [selectedBatchId, setSelectedBatchId] = useState<string>('');
 
@@ -3960,17 +3983,26 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       });
     });
 
-    let questionsList = Object.values(questionMap);
+    let questionsList = Object.values(questionMap).map((q: any) => {
+      const totalStudents = q.correct + q.incorrect + q.unattempted;
+      const attempted = q.correct + q.incorrect;
+      const accuracy = attempted > 0 ? Math.round((q.correct / attempted) * 100) : 0;
+      return {
+        ...q,
+        totalStudents,
+        attempted,
+        accuracy
+      };
+    });
+
     if (sortConfig) {
       questionsList.sort((a: any, b: any) => {
         let aVal = a[sortConfig.key];
         let bVal = b[sortConfig.key];
         
-        if (sortConfig.key === 'accuracy') {
-          const totalA = a.correct + a.incorrect;
-          aVal = totalA > 0 ? (a.correct / totalA) : 0;
-          const totalB = b.correct + b.incorrect;
-          bVal = totalB > 0 ? (b.correct / totalB) : 0;
+        const numericKeys = ['totalStudents', 'attempted', 'correct', 'incorrect', 'unattempted', 'accuracy', 'num'];
+        if (numericKeys.includes(sortConfig.key)) {
+          return sortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
         }
 
         if (typeof aVal === 'string') aVal = aVal.toLowerCase();
@@ -3995,6 +4027,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       topicTableList.sort((a: any, b: any) => {
         let aVal = a[topicSortConfig.key];
         let bVal = b[topicSortConfig.key];
+        const numericKeys = ['questionsCount', 'totalAttempts', 'correct', 'incorrect', 'unattempted', 'accuracy'];
+        if (numericKeys.includes(topicSortConfig.key)) {
+          return topicSortConfig.direction === 'asc' ? aVal - bVal : bVal - aVal;
+        }
         if (typeof aVal === 'string') aVal = aVal.toLowerCase();
         if (typeof bVal === 'string') bVal = bVal.toLowerCase();
         if (aVal < bVal) return topicSortConfig.direction === 'asc' ? -1 : 1;
@@ -4622,14 +4658,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     return aggregateStats?.studentTable?.length || 0;
   }, [aggregateStats]);
 
-  if (!aggregateStats) return (
-    <div className="flex flex-col items-center justify-center p-20 space-y-4">
-      <Loader label="Preparing Analytics..." />
-      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Processing response matrices</p>
-    </div>
-  );
-
   const handleExportGlobal = () => {
+    if (!aggregateStats) {
+      toast.error('No analytics data available to export');
+      return;
+    }
     let exportData: any[] = [];
     let filename = `Global_Analysis_${new Date().getTime()}.csv`;
 
@@ -4886,6 +4919,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     document.body.removeChild(link);
   };
 
+  const selectedProgObj = metaPrograms.find((p: any) => p.id === selectedProgramId);
+  const selectedProgramName = selectedProgObj ? selectedProgObj.programName : '';
+
   return (
     <div className={cn(hideHeader ? "space-y-10 relative" : "w-full p-6 md:p-10 space-y-10 relative")}>
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -4900,18 +4936,21 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               <p className="text-slate-500 font-medium text-sm">
                 {selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
                   ? tests.find(t => t.id === selectedTestIds[0])?.name 
-                  : `${selectedTestIds.length} Tests Selected`} • {filteredResultsCount} Students
+                  : `${selectedTestIds.length} Tests Selected`} • {filteredResultsCount} Students{selectedProgramName ? ` of ${selectedProgramName}` : ''}
               </p>
             </div>
           </div>
         ) : (
-          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4 min-w-0">
              <div className="space-y-0.5">
-               <p className="text-sm text-slate-500 font-bold">
-                 Comparing: <span className="text-slate-900 font-black">{selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
+               <div className="text-sm md:text-base text-slate-500 font-bold leading-relaxed flex flex-wrap items-center gap-x-2">
+                 <span>Comparing:</span>
+                 <span className="text-slate-900 font-black">{selectedTestIds.length === 1 && tests.find(t => t.id === selectedTestIds[0]) 
                    ? tests.find(t => t.id === selectedTestIds[0])?.name 
-                   : `${selectedTestIds.length} Test Series`}</span> • <span className="text-blue-600 font-black">{filteredResultsCount} Students</span>
-               </p>
+                   : `${selectedTestIds.length} Test Series`}</span>
+                 <span className="text-slate-300">•</span>
+                 <span className="text-blue-600 font-black">{filteredResultsCount} Students{selectedProgramName ? ` of ${selectedProgramName}` : ''}</span>
+               </div>
              </div>
           </div>
         )}
@@ -5064,15 +5103,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             )}
           </div>
 
-          <Button 
-            variant="secondary" 
-            size="sm" 
-            onClick={() => setIsFilterVisible(!isFilterVisible)}
-            className={cn("bg-white border border-slate-100 rounded-xl px-4", isFilterVisible && "bg-slate-900 text-white")}
-          >
-            <Filter size={16} className="mr-2" />
-            Filters
-          </Button>
           <div className="flex bg-slate-100 p-1.5 rounded-2xl">
             <button 
               onClick={() => setActiveAnalysisView('summary')}
@@ -5123,6 +5153,113 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         </div>
       </header>
 
+      {/* ALWAYS VISIBLE Direct Academic Context Selector Bar */}
+      <div className="flex flex-col lg:flex-row items-center justify-between gap-6 p-6 md:p-8 bg-slate-50 border border-slate-100 rounded-[2rem] text-left">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full lg:w-auto lg:min-w-[750px] flex-1">
+           {/* Direct Program Selector */}
+           <div className="space-y-2">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Division (Program)</label>
+             <Select 
+               value={selectedProgramId} 
+               onChange={e => {
+                 const newProgId = e.target.value;
+                 setSelectedProgramId(newProgId);
+                 setSelectedBatchId('');
+                 
+                 if (onSelectAllTests) {
+                   let filteredTests = tests;
+                   if (newProgId) {
+                     filteredTests = tests.filter((t: any) => t.programId === newProgId);
+                   } else if (metaPrograms && metaPrograms.length > 0) {
+                     const firstId = metaPrograms[0].id;
+                     filteredTests = tests.filter((t: any) => t.programId === firstId);
+                   }
+                   onSelectAllTests(filteredTests.map((t: any) => t.id));
+                 }
+               }}
+               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+             >
+               <option value="">All Divisions</option>
+               {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
+                 <option key={p.id} value={p.id}>{p.programName}</option>
+               ))}
+             </Select>
+           </div>
+
+           {/* Direct Center Selector */}
+           <div className="space-y-2">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
+             <Select 
+               value={selectedCenterId} 
+               onChange={e => {
+                 setSelectedCenterId(e.target.value);
+                 setSelectedBatchId('');
+               }}
+               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+             >
+               <option value="">All Centers</option>
+               {metaCenters.filter((c: any) => {
+                  if (!c.isActive) return false;
+                  if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
+                    const allowed = centerId.split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
+                    return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
+                  }
+                  return true;
+                }).map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.centerName}</option>
+                ))}
+             </Select>
+           </div>
+
+           {/* Direct Batch Selector */}
+           <div className="space-y-2">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Class Batch</label>
+             <Select 
+               value={selectedBatchId} 
+               onChange={e => {
+                 const newBatchId = e.target.value;
+                 setSelectedBatchId(newBatchId);
+                 
+                 if (onSelectAllTests) {
+                   let filteredTests = tests;
+                   if (newBatchId) {
+                     filteredTests = tests.filter((t: any) => t.batchIds?.includes(newBatchId));
+                   } else if (selectedProgramId) {
+                     filteredTests = tests.filter((t: any) => t.programId === selectedProgramId);
+                   } else if (metaPrograms && metaPrograms.length > 0) {
+                     const firstId = metaPrograms[0].id;
+                     filteredTests = tests.filter((t: any) => t.programId === firstId);
+                   }
+                   onSelectAllTests(filteredTests.map((t: any) => t.id));
+                 }
+               }}
+               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+             >
+               <option value="">All Batches</option>
+               {metaBatches.filter((b: any) => 
+                 b.isActive && 
+                 (!selectedProgramId || b.programId === selectedProgramId) &&
+                 (!selectedCenterId || b.centerId === selectedCenterId)
+               ).map((b: any) => (
+                 <option key={b.id} value={b.id}>{b.batchName} ({b.batchCode})</option>
+               ))}
+             </Select>
+           </div>
+        </div>
+
+        <div className="flex items-center gap-3 self-end lg:self-center">
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            onClick={() => setIsFilterVisible(!isFilterVisible)}
+            className={cn("bg-white border border-slate-200/80 rounded-xl px-4 h-11 font-bold text-xs shadow-sm whitespace-nowrap", isFilterVisible && "bg-slate-900 text-white")}
+          >
+            <Filter size={14} className="mr-2" />
+            {isFilterVisible ? "Hide Filters" : "More Filters"}
+          </Button>
+        </div>
+      </div>
+
       <AnimatePresence>
         {isFilterVisible && (
           <motion.div 
@@ -5132,68 +5269,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             className="overflow-hidden"
           >
             <Card className="p-8 border-slate-100 bg-slate-50/50 space-y-8 rounded-[2rem]">
-               {/* Primary Academic Context Dropdowns */}
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm text-left">
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Division (Program)</label>
-                   <Select 
-                     value={selectedProgramId} 
-                     onChange={e => {
-                       setSelectedProgramId(e.target.value);
-                       setSelectedBatchId('');
-                     }}
-                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
-                   >
-                     <option value="">All Divisions</option>
-                     {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
-                       <option key={p.id} value={p.id}>{p.programName}</option>
-                     ))}
-                   </Select>
-                 </div>
-
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
-                   <Select 
-                     value={selectedCenterId} 
-                     onChange={e => {
-                       setSelectedCenterId(e.target.value);
-                       setSelectedBatchId('');
-                     }}
-                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
-                   >
-                     <option value="">All Centers</option>
-                     {metaCenters.filter((c: any) => {
-                        if (!c.isActive) return false;
-                        if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
-                          const allowed = centerId.split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
-                          return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
-                        }
-                        return true;
-                      }).map((c: any) => (
-                        <option key={c.id} value={c.id}>{c.centerName}</option>
-                      ))}
-                   </Select>
-                 </div>
-
-                 <div className="space-y-2">
-                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Class Batch</label>
-                   <Select 
-                     value={selectedBatchId} 
-                     onChange={e => setSelectedBatchId(e.target.value)}
-                     className="rounded-xl border-slate-100 font-bold bg-slate-50 h-11 text-xs w-full"
-                   >
-                     <option value="">All Batches</option>
-                     {metaBatches.filter((b: any) => 
-                       b.isActive && 
-                       (!selectedProgramId || b.programId === selectedProgramId) &&
-                       (!selectedCenterId || b.centerId === selectedCenterId)
-                     ).map((b: any) => (
-                       <option key={b.id} value={b.id}>{b.batchName} ({b.batchCode})</option>
-                     ))}
-                   </Select>
-                 </div>
-               </div>
-
                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                   {/* Test Filter */}
                   <div className="space-y-4">
@@ -5393,7 +5468,21 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         )}
       </AnimatePresence>
 
-      {activeAnalysisView === 'summary' && (
+      {!aggregateStats ? (
+        <div className="flex flex-col items-center justify-center p-20 space-y-6 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm text-center">
+          <div className="p-4 bg-slate-50 rounded-full text-slate-400">
+            <Inbox size={48} strokeWidth={1.5} />
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-black text-xl text-slate-900 tracking-tight">No Test Data Found</h3>
+            <p className="text-sm font-medium text-slate-500 max-w-sm mx-auto leading-relaxed font-sans">
+              There are no student results recorded for the selected Division (Program), Center, or Batch.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {activeAnalysisView === 'summary' && (
         <>
           {/* Top Row: Difficulty Matrix & Subject Performance placed side-by-side */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -6139,63 +6228,94 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
             <div className="w-full overflow-hidden rounded-[1.5rem] border border-slate-100 bg-white">
               <div className="overflow-x-auto max-h-[60vh] hover-scrollbar no-scrollbar">
-                <table className="w-full text-left border-collapse table-fixed">
+                <table className="w-full text-left border-collapse table-fixed min-w-[1300px]">
                   <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100">
                     <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[8%] text-center"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[4%] text-center"
                         onClick={() => toggleSort('num')}
                       >
                         Q.No{renderSortDirection('num')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[12%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[6%]"
                         onClick={() => toggleSort('subject')}
                       >
                         Subject{renderSortDirection('subject')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[18%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[13%]"
                         onClick={() => toggleSort('chapter')}
                       >
                         Chapter{renderSortDirection('chapter')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[18%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[13%]"
                         onClick={() => toggleSort('topic')}
                       >
                         Topic{renderSortDirection('topic')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[18%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[13%]"
                         onClick={() => toggleSort('testName')}
                       >
-                        Test Name{renderSortDirection('testName')}
+                        Test{renderSortDirection('testName')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[10%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[7%]"
                         onClick={() => toggleSort('testDate')}
                       >
                         Date{renderSortDirection('testDate')}
                       </th>
                       <th 
-                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[10%]"
+                        className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[7%]"
                         onClick={() => toggleSort('programName')}
                       >
                         Program{renderSortDirection('programName')}
                       </th>
                       <th 
+                        className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
+                        onClick={() => toggleSort('totalStudents')}
+                      >
+                        Total Students{renderSortDirection('totalStudents')}
+                      </th>
+                      <th 
+                        className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[7%]"
+                        onClick={() => toggleSort('attempted')}
+                      >
+                        Attempted{renderSortDirection('attempted')}
+                      </th>
+                      <th 
                         className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[6%]"
+                        onClick={() => toggleSort('correct')}
+                      >
+                        Correct{renderSortDirection('correct')}
+                      </th>
+                      <th 
+                        className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[7%]"
+                        onClick={() => toggleSort('incorrect')}
+                      >
+                        Incorrect{renderSortDirection('incorrect')}
+                      </th>
+                      <th 
+                        className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
+                        onClick={() => toggleSort('unattempted')}
+                      >
+                        Unattempted{renderSortDirection('unattempted')}
+                      </th>
+                      <th 
+                        className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[5%]"
                         onClick={() => toggleSort('accuracy')}
                       >
-                        Acc{renderSortDirection('accuracy')}
+                        % Accuracy{renderSortDirection('accuracy')}
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50 text-[11px] font-semibold text-slate-600">
                     {filteredList.map((q: any, idx: number) => {
-                      const totalAttempts = q.correct + q.incorrect;
-                      const accVal = totalAttempts > 0 ? Math.round((q.correct / totalAttempts) * 100) : 0;
+                      const totalStudents = q.totalStudents || (q.correct + q.incorrect + q.unattempted);
+                      const attempted = q.attempted || (q.correct + q.incorrect);
+                      const accVal = q.accuracy !== undefined ? q.accuracy : (attempted > 0 ? Math.round((q.correct / attempted) * 100) : 0);
 
                       return (
                         <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
@@ -6215,6 +6335,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           <td className="px-4 py-2.5 font-bold text-slate-800 truncate" title={q.testName}>{q.testName}</td>
                           <td className="px-4 py-2.5 font-mono text-slate-500 truncate" title={q.testDate}>{q.testDate}</td>
                           <td className="px-4 py-2.5 font-mono text-slate-500 truncate" title={q.programName}>{q.programName}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-700">{totalStudents}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-600">{attempted}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-emerald-600">{q.correct}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-rose-500">{q.incorrect}</td>
+                          <td className="px-4 py-2.5 text-center font-bold text-slate-400">{q.unattempted}</td>
                           <td className="px-4 py-2.5 text-center">
                             <span className={cn(
                               "text-xs font-black px-2 py-0.5 rounded-md",
@@ -6292,19 +6417,19 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100">
                       <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                         <th 
-                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[15%]"
+                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[10%]"
                           onClick={() => toggleTopicSort('subject')}
                         >
                           Subject{renderTopicSortDirection('subject')}
                         </th>
                         <th 
-                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[22%]"
+                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[18%]"
                           onClick={() => toggleTopicSort('chapter')}
                         >
                           Chapter{renderTopicSortDirection('chapter')}
                         </th>
                         <th 
-                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[25%]"
+                          className="px-4 py-3 cursor-pointer hover:text-blue-600 transition-colors w-[22%]"
                           onClick={() => toggleTopicSort('topic')}
                         >
                           Topic Name{renderTopicSortDirection('topic')}
@@ -6322,16 +6447,22 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           Total Attempts{renderTopicSortDirection('totalAttempts')}
                         </th>
                         <th 
-                          className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[6%]"
+                          className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
                           onClick={() => toggleTopicSort('correct')}
                         >
                           Correct{renderTopicSortDirection('correct')}
                         </th>
                         <th 
-                          className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[6%]"
+                          className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
                           onClick={() => toggleTopicSort('incorrect')}
                         >
                           Incorrect{renderTopicSortDirection('incorrect')}
+                        </th>
+                        <th 
+                          className="px-4 py-4 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
+                          onClick={() => toggleTopicSort('unattempted')}
+                        >
+                          Unattempted{renderTopicSortDirection('unattempted')}
                         </th>
                         <th 
                           className="px-4 py-3 text-center cursor-pointer hover:text-blue-600 transition-colors w-[8%]"
@@ -6361,6 +6492,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             <td className="px-4 py-2.5 text-center font-bold text-slate-700">{t.totalAttempts}</td>
                             <td className="px-4 py-2.5 text-center font-black text-emerald-600">{t.correct}</td>
                             <td className="px-4 py-2.5 text-center font-black text-rose-500">{t.incorrect}</td>
+                            <td className="px-4 py-2.5 text-center font-bold text-slate-400">{t.unattempted ?? 0}</td>
                             <td className="px-4 py-2.5 text-center">
                               <span className={cn(
                                 "text-xs font-black px-2 py-0.5 rounded-md",
@@ -7035,6 +7167,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );
