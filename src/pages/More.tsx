@@ -38,7 +38,7 @@ export default function More() {
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedStatus, setSeedStatus] = useState<string | null>(null);
 
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
 
   const [counts, setCounts] = useState({ programs: 0, centers: 0, batches: 0 });
   const [purging, setPurging] = useState<string | null>(null);

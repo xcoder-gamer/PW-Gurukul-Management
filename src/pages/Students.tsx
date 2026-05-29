@@ -56,7 +56,7 @@ export const invalidateStudentCache = () => {
 
 export default function Students() {
   const { user, role, centerId, batchIds } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
   const isViewOnly = role === 'center' || role === 'center_level' || role === 'teacher' || role === 'central';
   const canEdit = isAdmin;
   
@@ -1943,7 +1943,7 @@ function StudentProfile({
   batches: any[]
 }) {
   const { role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
   const [formData, setFormData] = useState({
     name: student.name || '',
     regNo: student.regNo || '',

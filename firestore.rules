@@ -37,11 +37,13 @@ service cloud.firestore {
     }
 
     function isCentralTeam() {
-      return isSignedIn() && getRole() == 'central_team';
+      let role = getRole();
+      return isSignedIn() && (role == 'central_team' || role == 'central' || role == 'operator');
     }
 
     function isCenterLevel() {
-      return isSignedIn() && getRole() == 'center_level';
+      let role = getRole();
+      return isSignedIn() && (role == 'center_level' || role == 'center');
     }
 
     function isTeacher() {
@@ -119,15 +121,15 @@ service cloud.firestore {
 
     match /centers/{centerId} {
       allow read: if isSignedIn();
-      allow write: if (isAdmin() || isOperator()) && isValidId(centerId);
+      allow write: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(centerId);
     }
 
     match /batches/{batchId} {
       allow read: if isAdmin() || isCentralTeam() 
         || (isCenterLevel() && resource.data.centerId == getUserCenterId())
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), batchId));
-      allow create: if (isAdmin() || isOperator()) && isValidId(batchId) && isValidBatch(incoming());
-      allow update: if (isAdmin() || isOperator()) && isValidBatch(incoming());
+      allow create: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(batchId) && isValidBatch(incoming());
+      allow update: if (isAdmin() || isOperator() || isCentralTeam()) && isValidBatch(incoming());
       allow delete: if canDelete();
     }
 
@@ -135,15 +137,15 @@ service cloud.firestore {
       allow read: if isAdmin() || isCentralTeam()
         || (isCenterLevel() && resource.data.centerId == getUserCenterId())
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), resource.data.batchId));
-      allow create: if (isAdmin() || isOperator()) && isValidId(studentId) && isValidStudent(incoming());
-      allow update: if (isAdmin() || isOperator()) && isValidStudent(incoming());
+      allow create: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(studentId) && isValidStudent(incoming());
+      allow update: if (isAdmin() || isOperator() || isCentralTeam()) && isValidStudent(incoming());
       allow delete: if canDelete();
     }
 
     match /tests/{testId} {
         allow read: if isAdmin() || isCentralTeam() || isCenterLevel() || isTeacher();
-        allow create: if (isAdmin() || isOperator()) && isValidId(testId) && isValidTest(incoming());
-        allow update: if (isAdmin() || isOperator()) && isValidTest(incoming());
+        allow create: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(testId) && isValidTest(incoming());
+        allow update: if (isAdmin() || isOperator() || isCentralTeam()) && isValidTest(incoming());
         allow delete: if canDelete();
     }
 
@@ -151,8 +153,8 @@ service cloud.firestore {
       allow read: if isAdmin() || isCentralTeam()
         || (isCenterLevel() && get(/databases/$(database)/documents/students/$(resource.data.regNo)).data.centerId == getUserCenterId())
         || (isTeacher() && isMappingExists(request.auth.token.email.lower(), get(/databases/$(database)/documents/students/$(resource.data.regNo)).data.batchId));
-      allow create: if (isAdmin() || isOperator()) && isValidId(resultId) && isValidResult(incoming());
-      allow update: if (isAdmin() || isOperator()) && isValidResult(incoming());
+      allow create: if (isAdmin() || isOperator() || isCentralTeam()) && isValidId(resultId) && isValidResult(incoming());
+      allow update: if (isAdmin() || isOperator() || isCentralTeam()) && isValidResult(incoming());
       allow delete: if canDelete();
     }
 

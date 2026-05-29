@@ -1185,8 +1185,8 @@ export default function Results() {
   const { user, role, centerId, batchIds } = useAuth();
   const { programs: metaPrograms, centers: metaCenters, batches: metaBatches, qbgMap: metaQbgMap, qbgLibrary: metaQbgLibrary } = useMetadata();
 
-  const isAdmin = role === 'admin';
-  const canEdit = role === 'admin';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
+  const canEdit = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
   const [view, setView] = useState<'list' | 'detail' | 'table' | 'analytics'>('table');
   const [isReevaluating, setIsReevaluating] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
@@ -7042,7 +7042,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
 function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSelectedResult }: { result: any, onBack: () => void, onUpdate?: () => void, autoPrint?: boolean, tests?: any[], setSelectedResult?: (res: any) => void }) {
   const { role } = useAuth();
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
   const { qbgMap: qbgTopics } = useMetadata();
   const [test, setTest] = useState<any>(null);
   const [isSyncing, setIsSyncing] = useState(false);

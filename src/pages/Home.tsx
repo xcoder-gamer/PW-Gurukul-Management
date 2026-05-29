@@ -198,7 +198,7 @@ export default function Home() {
     fetchData();
   }, [filters]);
 
-  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team';
+  const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
 
   const quickActions = [
     { label: 'Student Directory', icon: UserPlus, color: 'bg-blue-50 text-blue-600', path: '/students' },
