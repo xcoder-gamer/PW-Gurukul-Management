@@ -4305,6 +4305,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           getDocs(studentsQuery)
         ]);
 
+        const resultsList = resultsSnap.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as any[];
         const studentsList = studentsSnap.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) })) as any[];
         const studentMap = studentsList.reduce((acc: any, s) => {
           if (s.regNo) {
@@ -4313,21 +4314,61 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           return acc;
         }, {});
 
-        const docs = resultsSnap.docs.map(doc => {
-          const res = { id: doc.id, ...(doc.data() as any) } as any;
+        // Dynamically fetch and merge up-to-date student details for any missing student mappings in Comparison view
+        const uniqueRegNos = Array.from(new Set(resultsList.map(r => String(r.regNo || '').trim().toUpperCase()).filter(Boolean)));
+        const missingRegNos = uniqueRegNos.filter(regNo => !studentMap[regNo] && !studentCache[regNo]);
+        
+        if (missingRegNos.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < missingRegNos.length; i += 30) {
+            chunks.push(missingRegNos.slice(i, i + 30));
+          }
+          try {
+            const studentSnaps = await Promise.all(
+              chunks.map(chunk => getDocs(query(collection(db, 'students'), where('regNo', 'in', chunk))))
+            );
+            studentSnaps.forEach(snap => {
+              snap.docs.forEach(docSnap => {
+                const data = docSnap.data();
+                if (data.regNo) {
+                  const regUpper = String(data.regNo).trim().toUpperCase();
+                  studentCache[regUpper] = { id: docSnap.id, ...data };
+                }
+              });
+            });
+          } catch (studentErr) {
+            console.warn("Failed fetching students dynamically for comparison results:", studentErr);
+          }
+        }
+
+        uniqueRegNos.forEach(regNo => {
+          if (!studentMap[regNo] && studentCache[regNo]) {
+            studentMap[regNo] = studentCache[regNo];
+          }
+        });
+
+        const docs = resultsList.map(res => {
           const regKey = String(res.regNo || '').trim().toUpperCase();
           const studentInfo = studentMap[regKey];
           
           if (studentInfo) {
+            const bId = studentInfo.batchId || res.batchId;
+            const cId = studentInfo.centerId || res.centerId;
+            const pId = studentInfo.programId || res.programId;
+
+            const batchDetail = findBatchSafely(bId, metaBatches);
+            const centerDetail = findCenterSafely(cId, metaCenters);
+            const programDetail = findProgramSafely(pId, metaPrograms);
+
             return {
               ...res,
               studentName: studentInfo.name || res.studentName,
-              centerId: studentInfo.centerId || res.centerId,
-              centerName: studentInfo.centerName || res.centerName,
-              batchId: studentInfo.batchId || res.batchId,
-              batchName: studentInfo.batchName || res.batchName,
-              programId: studentInfo.programId || res.programId,
-              programName: studentInfo.programName || res.programName,
+              centerId: centerDetail?.id || cId,
+              centerName: centerDetail?.centerName || res.centerName,
+              batchId: batchDetail?.id || bId,
+              batchName: batchDetail?.batchName || res.batchName,
+              programId: programDetail?.id || pId,
+              programName: programDetail?.programName || res.programName,
               regNo: studentInfo.regNo || res.regNo,
               type: studentInfo.type || '',
               rankTarget: studentInfo.rankTarget || '',
