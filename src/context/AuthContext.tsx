@@ -203,6 +203,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    // Clear all metadata cache values
+    localStorage.removeItem('meta_cache_programs');
+    localStorage.removeItem('meta_cache_centers');
+    localStorage.removeItem('meta_cache_batches');
+    localStorage.removeItem('meta_cache_test_patterns');
+    localStorage.removeItem('meta_cache_qbg_library');
+    localStorage.removeItem('meta_cache_timestamp');
+    
+    // Clear all user-specific role caches
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('cached_role_') || key.startsWith('cached_center_') || key.startsWith('cached_batches_'))) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+
     await signOut(auth);
   };
 

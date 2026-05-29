@@ -31,13 +31,15 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
 
   const fetchMetadata = useCallback(async (force = false) => {
     if (!user) return;
-    setLoading(true);
 
     const now = Date.now();
     const cachedTime = localStorage.getItem('meta_cache_timestamp');
-    const cacheDuration = 30 * 60 * 1000; // 30 minutes cache duration
+    const cacheDuration = 10 * 1000; // 10 seconds cache duration for strict instant reload throttling, otherwise revalidate
 
-    if (!force && cachedTime && (now - Number(cachedTime) < cacheDuration)) {
+    let hasLoadedFromCache = false;
+
+    // SWR Part 1: Load from local storage cache immediately so UI is instantly populated
+    if (cachedTime) {
       try {
         const cachedProg = JSON.parse(localStorage.getItem('meta_cache_programs') || '[]');
         const cachedCent = JSON.parse(localStorage.getItem('meta_cache_centers') || '[]');
@@ -59,12 +61,22 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
           setQbgMap(map);
           setQbgFlatList(qbgList);
           setLoaded(true);
-          setLoading(false);
-          return;
+          hasLoadedFromCache = true;
         }
       } catch (e) {
         console.warn("Failed parsing cached metadata in localStorage, proceeding to fetch fresh.", e);
       }
+    }
+
+    // Skip remote database query only if cache is extremely fresh (less than 10s old)
+    if (!force && cachedTime && (now - Number(cachedTime) < cacheDuration) && hasLoadedFromCache) {
+      return;
+    }
+
+    // SWR Part 2: Proceed with loading fresh metadata in the background.
+    // Set loading indicator only if we had absolutely no cached data to show.
+    if (!hasLoadedFromCache) {
+      setLoading(true);
     }
 
     try {
