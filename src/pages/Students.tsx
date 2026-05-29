@@ -97,8 +97,11 @@ export default function Students() {
     let initialCenter = '';
     let initialBatch = '';
     if (role === 'center' || role === 'center_level' || role === 'center') {
-      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
-        initialCenter = centerId;
+      if (centerId && centerId !== 'all') {
+        const allowed = centerId.split(',').map(id => id.trim()).filter(Boolean);
+        if (allowed.length > 0) {
+          initialCenter = allowed[0];
+        }
       }
     } else if (role === 'teacher') {
       if (batchIds && batchIds.length > 0) {
@@ -120,9 +123,12 @@ export default function Students() {
 
   useEffect(() => {
     if (role === 'center' || role === 'center_level' || role === 'center') {
-      if (centerId && centerId !== 'all' && !centerId.includes(',')) {
-        if (filters.center !== centerId) {
-          setFilters(f => ({ ...f, center: centerId }));
+      if (centerId && centerId !== 'all') {
+        const allowed = centerId.split(',').map(id => id.trim()).filter(Boolean);
+        if (allowed.length > 0) {
+          if (!filters.center || !allowed.map(x => x.toLowerCase()).includes(filters.center.toLowerCase())) {
+            setFilters(f => ({ ...f, center: allowed[0] }));
+          }
         }
       }
     } else if (role === 'teacher') {
@@ -189,7 +195,20 @@ export default function Students() {
     try {
       let q;
       if ((role === 'center' || role === 'center_level' || role === 'center') && centerId !== 'all') {
-        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+        const rawAllowed = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
+        const allowedCentersSet = new Set<string>();
+        rawAllowed.forEach(id => {
+          allowedCentersSet.add(id);
+          const match = centers.find(c => 
+            String(c.id).trim().toLowerCase() === id.toLowerCase() || 
+            String(c.centerName || '').trim().toLowerCase() === id.toLowerCase()
+          );
+          if (match) {
+            if (match.id) allowedCentersSet.add(match.id);
+            if (match.centerName) allowedCentersSet.add(match.centerName);
+          }
+        });
+        const allowedCenters = Array.from(allowedCentersSet);
         if (allowedCenters.length > 1) {
           if (filters.batch) {
             q = query(collection(db, 'students'), where('centerId', 'in', allowedCenters), where('batchId', '==', filters.batch));
@@ -215,7 +234,23 @@ export default function Students() {
         if (filters.batch) {
           q = query(collection(db, 'students'), where('batchId', '==', filters.batch));
         } else if (filters.center) {
-          q = query(collection(db, 'students'), where('centerId', '==', filters.center), limit(1500));
+          const rawId = filters.center;
+          const matchingCenterSet = new Set<string>();
+          matchingCenterSet.add(rawId);
+          const match = centers.find(c => 
+            String(c.id).toLowerCase() === rawId.toLowerCase() || 
+            String(c.centerName || '').toLowerCase() === rawId.toLowerCase()
+          );
+          if (match) {
+            if (match.id) matchingCenterSet.add(match.id);
+            if (match.centerName) matchingCenterSet.add(match.centerName);
+          }
+          const allowed = Array.from(matchingCenterSet);
+          if (allowed.length > 1) {
+            q = query(collection(db, 'students'), where('centerId', 'in', allowed), limit(1500));
+          } else {
+            q = query(collection(db, 'students'), where('centerId', '==', rawId), limit(1500));
+          }
         } else if (filters.program) {
           q = query(collection(db, 'students'), where('programId', '==', filters.program), limit(1500));
         } else {
@@ -448,8 +483,23 @@ export default function Students() {
     return students.filter(s => {
       // Security role filters:
       if ((role === 'center' || role === 'center_level' || role === 'center') && centerId !== 'all') {
-        const allowedCenters = centerId ? centerId.split(',').map((id: string) => id.trim()).filter(Boolean) : [];
-        if (!allowedCenters.includes(s.centerId)) {
+        const allowedCentersSet = (() => {
+          const ids = centerId ? centerId.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
+          const set = new Set(ids);
+          ids.forEach(id => {
+            const match = centers.find(c => 
+              String(c.id).trim().toLowerCase() === id || 
+              String(c.centerName || '').trim().toLowerCase() === id
+            );
+            if (match) {
+              set.add(String(match.id).trim().toLowerCase());
+              set.add(String(match.centerName || '').trim().toLowerCase());
+            }
+          });
+          return set;
+        })();
+        const sCenterIdLower = String(s.centerId || '').trim().toLowerCase();
+        if (!allowedCentersSet.has(sCenterIdLower)) {
           return false;
         }
       }
@@ -464,7 +514,26 @@ export default function Students() {
       const matchesSearch = name.toLowerCase().includes(search.toLowerCase()) || 
                             regNo.toLowerCase().includes(search.toLowerCase());
       const matchesProgram = !filters.program || s.programId === filters.program;
-      const matchesCenter = !filters.center || s.centerId === filters.center;
+      
+      const matchesCenter = (() => {
+        if (!filters.center) return true;
+        
+        const fCenterLower = filters.center.toLowerCase();
+        const fMatch = centers.find(c => 
+          String(c.id).toLowerCase() === fCenterLower || 
+          String(c.centerName || '').toLowerCase() === fCenterLower
+        );
+        
+        const sCenterLower = String(s.centerId || '').toLowerCase();
+        
+        if (fMatch) {
+          return sCenterLower === String(fMatch.id).toLowerCase() || 
+                 sCenterLower === String(fMatch.centerName || '').toLowerCase();
+        }
+        
+        return sCenterLower === fCenterLower;
+      })();
+
       const matchesBatch = !filters.batch || s.batchId === filters.batch;
       const matchesGender = !filters.gender || s.gender === filters.gender;
       const matchesType = !filters.type || s.type === filters.type;
@@ -476,7 +545,7 @@ export default function Students() {
              matchesGender && matchesType && matchesTargetYear && matchesRankTarget && 
              matchesStatus;
     });
-  }, [students, search, filters, role, centerId, batchIds]);
+  }, [students, search, filters, role, centerId, batchIds, centers]);
 
   // Memoize sorted students
   const sortedStudents = React.useMemo(() => {
@@ -1381,7 +1450,7 @@ export default function Students() {
                 <option value="Above 5000">Above 5000</option>
               </Select>
             </div>
-            <div className="space-y-2">
+             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Batch Code</label>
               {role === 'teacher' ? (
                 <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
@@ -1393,8 +1462,23 @@ export default function Students() {
                 <Select value={filters.batch} onChange={e => setFilters({...filters, batch: e.target.value})}>
                   <option value="">All Batch Codes</option>
                   {batches.filter(b => b.isActive).map(b => (
-                    (!filters.program || b.programId === filters.program) && 
-                    (!filters.center || b.centerId === filters.center) &&
+                    (() => {
+                      if (!filters.program || b.programId === filters.program) {
+                        if (!filters.center) return true;
+                        const fCenterLower = filters.center.toLowerCase();
+                        const fMatch = centers.find(c => 
+                          String(c.id).toLowerCase() === fCenterLower || 
+                          String(c.centerName || '').toLowerCase() === fCenterLower
+                        );
+                        const bCenterLower = String(b.centerId || '').toLowerCase();
+                        if (fMatch) {
+                          return bCenterLower === String(fMatch.id).toLowerCase() || 
+                                 bCenterLower === String(fMatch.centerName || '').toLowerCase();
+                        }
+                        return bCenterLower === fCenterLower;
+                      }
+                      return false;
+                    })() &&
                     <option key={b.id} value={b.id}>{b.batchName}</option>
                   ))}
                 </Select>
@@ -1410,8 +1494,17 @@ export default function Students() {
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Center</label>
               {(role === 'center' || role === 'center_level') ? (
-                <Select value={centerId || ''} disabled>
-                  {centers.filter(c => c.id === centerId).map(c => <option key={c.id} value={c.id}>{c.centerName}</option>)}
+                <Select 
+                  value={filters.center} 
+                  onChange={e => setFilters({...filters, center: e.target.value, batch: ''})}
+                >
+                  {centerId && centerId !== 'all' && centerId.includes(',') && <option value="">All My Centers</option>}
+                  {centers.filter((c: any) => {
+                    const allowed = centerId ? centerId.split(',').map((id) => id.trim().toLowerCase()).filter(Boolean) : [];
+                    return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
+                  }).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.centerName}</option>
+                  ))}
                 </Select>
               ) : (
                 <Select value={filters.center} onChange={e => setFilters({...filters, center: e.target.value, batch: ''})}>
