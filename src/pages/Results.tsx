@@ -29,6 +29,22 @@ import {
   Inbox
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  PieChart,
+  Pie,
+  Cell,
+  ComposedChart
+} from 'recharts';
 import { BottomSheet } from './Students';
 import { cn } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
@@ -1230,6 +1246,7 @@ export default function Results() {
     subject: 'all',
     difficulty: 'all',
     testMode: 'all' as 'all' | 'offline' | 'online',
+    studentType: 'all' as 'all' | 'Hosteller' | 'e-Gurukul' | 'Day Boarding',
     programId: '',
     centerId: '',
     batchId: ''
@@ -1378,6 +1395,20 @@ export default function Results() {
 
     if (filters.testMode !== 'all') {
       filtered = filtered.filter(r => (r.testMode || 'offline') === filters.testMode);
+    }
+
+    if (filters.studentType && filters.studentType !== 'all') {
+      filtered = filtered.filter(r => {
+        const typeStr = String(r.type || '').toLowerCase();
+        if (filters.studentType === 'Hosteller') {
+          return typeStr.includes('hostel');
+        } else if (filters.studentType === 'e-Gurukul') {
+          return typeStr.includes('gurukul') || typeStr.includes('guru');
+        } else if (filters.studentType === 'Day Boarding') {
+          return typeStr.includes('board') || typeStr.includes('day');
+        }
+        return true;
+      });
     }
 
     if (filters.programId) {
@@ -3215,6 +3246,7 @@ export default function Results() {
                     subject: 'all', 
                     difficulty: 'all', 
                     testMode: 'all',
+                    studentType: 'all',
                     programId: '',
                     centerId: '',
                     batchId: ''
@@ -3730,7 +3762,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const { role, centerId, batchIds } = useAuth();
-  const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison'>('summary');
+  const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison' | 'center_comparison' | 'test_max_avg' | 'student_progress'>('summary');
+  const [centerSubView, setCenterSubView] = useState<'all' | 'center' | 'trends' | 'progress'>('all');
+  const [studentType, setStudentType] = useState<'all' | 'Hosteller' | 'Day Boarding' | 'e-Gurukul'>('all');
+  const filters = { studentType };
+  const setFilters = (updater: any) => {
+    if (typeof updater === 'function') {
+      const dummy = updater({ studentType });
+      setStudentType(dummy.studentType);
+    } else {
+      setStudentType(updater.studentType);
+    }
+  };
   const [selectedCompStudentReg, setSelectedCompStudentReg] = useState<string>('');
   const [compHistory, setCompHistory] = useState<any[]>([]);
   const [isLoadingCompHistory, setIsLoadingCompHistory] = useState(false);
@@ -3844,6 +3887,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
       // Apply Test Mode Filter for aggregate analysis
       if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
+
+      // Apply Student Type Filter
+      if (filters.studentType && filters.studentType !== 'all') {
+        const typeStr = String(res.type || '').toLowerCase();
+        if (filters.studentType === 'Hosteller') {
+          if (!typeStr.includes('hostel')) return;
+        } else if (filters.studentType === 'e-Gurukul') {
+          if (!typeStr.includes('gurukul') && !typeStr.includes('guru')) return;
+        } else if (filters.studentType === 'Day Boarding') {
+          if (!typeStr.includes('board') && !typeStr.includes('day')) return;
+        }
+      }
       
       // Multi-student selection filter
       if (selectedStudents.length > 0 && !selectedStudents.includes(sKey)) return;
@@ -4222,7 +4277,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       studentTable: studentTableList,
       allStudents: allStudentsList 
     };
-  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig, selectedProgramId, selectedCenterId, selectedBatchId, tests]);
+  }, [results, qbgMap, selectedSubjects, selectedChapters, selectedTopics, selectedTestIds, selectedTestModes, studentSearch, selectedStudents, studentSortConfig, sortConfig, topicSortConfig, selectedProgramId, selectedCenterId, selectedBatchId, tests, filters.studentType]);
 
   useEffect(() => {
     if (!selectedCompStudentReg && aggregateStats?.allStudents && aggregateStats.allStudents.length > 0) {
@@ -4234,6 +4289,219 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       }
     }
   }, [aggregateStats, selectedCompStudentReg]);
+
+  // Elite candidates cross-center highlights
+  const outstandingCandidates = useMemo(() => {
+    if (results.length === 0) return [];
+    const seen = new Set();
+    const list: any[] = [];
+    const sorted = [...results]
+      .filter(r => !r.isAbsent && r.score != null)
+      .sort((a, b) => (b.score || 0) - (a.score || 0));
+      
+    for (const r of sorted) {
+      if (list.length >= 6) break;
+      const key = `${r.regNo}_${r.studentName}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({
+          studentName: r.studentName,
+          regNo: r.regNo,
+          centerName: r.centerName,
+          batchName: r.batchName,
+          score: r.score,
+          maxScore: r.maxScore || (r.testPattern === 'NEET' || (tests.find(t => t.id === r.testId)?.pattern === 'NEET') ? 720 : 360),
+          accuracy: r.accuracy || 0,
+          testName: r.testName
+        });
+      }
+    }
+    return list;
+  }, [results, tests]);
+
+  // Center on Center comparison calculation
+  const centerComparisonData = useMemo(() => {
+    if (results.length === 0) return [];
+    const centerGroups: Record<string, any[]> = {};
+    
+    results.forEach(res => {
+      if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
+      if (selectedProgramId && res.programId !== selectedProgramId) return;
+      if (selectedCenterId && res.centerId !== selectedCenterId) return;
+      if (selectedBatchId && res.batchId !== selectedBatchId) return;
+      if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
+      if (filters.studentType && filters.studentType !== 'all') {
+        const typeStr = String(res.type || '').toLowerCase();
+        if (filters.studentType === 'Hosteller') {
+          if (!typeStr.includes('hostel')) return;
+        } else if (filters.studentType === 'e-Gurukul') {
+          if (!typeStr.includes('gurukul') && !typeStr.includes('guru')) return;
+        } else if (filters.studentType === 'Day Boarding') {
+          if (!typeStr.includes('board') && !typeStr.includes('day')) return;
+        }
+      }
+      
+      const cName = res.centerName || 'Unknown Center';
+      if (!centerGroups[cName]) {
+        centerGroups[cName] = [];
+      }
+      centerGroups[cName].push(res);
+    });
+    
+    return Object.entries(centerGroups).map(([centerName, resList]) => {
+      const totalAttempts = resList.length;
+      const uniqueStudents = new Set(resList.map(r => r.regNo || r.studentName)).size;
+      const totalScore = resList.reduce((sum, r) => sum + (r.score || 0), 0);
+      const avgScore = totalAttempts > 0 ? Math.round(totalScore / totalAttempts) : 0;
+      const maxScore = Math.max(...resList.map(r => r.score || 0));
+      
+      let totalCorrect = 0;
+      let totalQuestions = 0;
+      resList.forEach(r => {
+        totalCorrect += r.correct || 0;
+        totalQuestions += (r.correct || 0) + (r.wrong || 0) + (r.blank || 0);
+      });
+      const avgAccuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
+      
+      return {
+        centerName,
+        totalAttempts,
+        uniqueStudents,
+        avgScore,
+        maxScore,
+        avgAccuracy
+      };
+    }).sort((a, b) => b.avgScore - a.avgScore);
+  }, [results, selectedTestIds, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestModes, filters.studentType]);
+
+  // Max Avg Comparison on Test calculation
+  const testMaxAvgData = useMemo(() => {
+    const testMap: Record<string, { testId: string, testName: string, testDate: string, scores: number[], correct: number, totalQ: number, attendance: number }> = {};
+    
+    results.forEach(res => {
+      if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
+      if (selectedProgramId && res.programId !== selectedProgramId) return;
+      if (selectedCenterId && res.centerId !== selectedCenterId) return;
+      if (selectedBatchId && res.batchId !== selectedBatchId) return;
+      if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
+      if (filters.studentType && filters.studentType !== 'all') {
+        const typeStr = String(res.type || '').toLowerCase();
+        if (filters.studentType === 'Hosteller') {
+          if (!typeStr.includes('hostel')) return;
+        } else if (filters.studentType === 'e-Gurukul') {
+          if (!typeStr.includes('gurukul') && !typeStr.includes('guru')) return;
+        } else if (filters.studentType === 'Day Boarding') {
+          if (!typeStr.includes('board') && !typeStr.includes('day')) return;
+        }
+      }
+      
+      const tId = res.testId;
+      if (!testMap[tId]) {
+        const tObj = tests.find(t => t.id === tId);
+        testMap[tId] = {
+          testId: tId,
+          testName: tObj?.name || res.testName || 'Unknown Test',
+          testDate: tObj?.date || res.testDate || res.date || '—',
+          scores: [],
+          correct: 0,
+          totalQ: 0,
+          attendance: 0
+        };
+      }
+      
+      testMap[tId].scores.push(res.score || 0);
+      testMap[tId].correct += res.correct || 0;
+      testMap[tId].totalQ += (res.correct || 0) + (res.wrong || 0) + (res.blank || 0);
+      testMap[tId].attendance++;
+    });
+    
+    return Object.values(testMap).map(t => {
+      const maxScore = t.scores.length > 0 ? Math.max(...t.scores) : 0;
+      const avgScore = t.scores.length > 0 ? Math.round(t.scores.reduce((sum, s) => sum + s, 0) / t.scores.length) : 0;
+      const avgAccuracy = t.totalQ > 0 ? Math.round((t.correct / t.totalQ) * 100) : 0;
+      
+      return {
+        testId: t.testId,
+        testName: t.testName,
+        testDate: t.testDate,
+        maxScore,
+        avgScore,
+        avgAccuracy,
+        attendance: t.attendance
+      };
+    }).sort((a, b) => String(a.testDate).localeCompare(String(b.testDate)));
+  }, [results, selectedTestIds, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestModes, filters.studentType, tests]);
+
+  // Student Progress calculation
+  const studentProgressData = useMemo(() => {
+    const list: any[] = [];
+    let progressedCount = 0;
+    let declinedCount = 0;
+    let stableCount = 0;
+    let singleTestCount = 0;
+    
+    if (!aggregateStats?.studentTable) return { list: [], progressedCount, declinedCount, stableCount, singleTestCount };
+    
+    aggregateStats.studentTable.forEach((s: any) => {
+      const attempts = s.attempts || [];
+      if (attempts.length === 0) return;
+      
+      const sortedAttempts = [...attempts].sort((a: any, b: any) => String(a.testDate).localeCompare(String(b.testDate)));
+      const count = sortedAttempts.length;
+      if (count === 1) {
+        singleTestCount++;
+        list.push({
+          studentName: s.studentName,
+          regNo: s.regNo,
+          centerName: s.centerName,
+          batchName: s.batchName,
+          attemptsCount: 1,
+          firstScore: sortedAttempts[0].score,
+          lastScore: sortedAttempts[0].score,
+          change: 0,
+          status: 'Single Test',
+          trend: []
+        });
+        return;
+      }
+      
+      const firstAttempt = sortedAttempts[0];
+      const lastAttempt = sortedAttempts[count - 1];
+      const change = (lastAttempt.score || 0) - (firstAttempt.score || 0);
+      
+      let status: 'Progressed' | 'Declined' | 'Stable' = 'Stable';
+      if (change > 5) {
+        status = 'Progressed';
+        progressedCount++;
+      } else if (change < -5) {
+        status = 'Declined';
+        declinedCount++;
+      } else {
+        stableCount++;
+      }
+      
+      list.push({
+        studentName: s.studentName,
+        regNo: s.regNo,
+        centerName: s.centerName,
+        batchName: s.batchName,
+        attemptsCount: count,
+        firstScore: firstAttempt.score,
+        lastScore: lastAttempt.score,
+        change,
+        status,
+        trend: sortedAttempts.map(a => ({ testName: a.testName, score: a.score }))
+      });
+    });
+    
+    return {
+      list: list.sort((a, b) => b.change - a.change),
+      progressedCount,
+      declinedCount,
+      stableCount,
+      singleTestCount
+    };
+  }, [aggregateStats]);
 
   useEffect(() => {
     const fetchCompHistory = async () => {
@@ -5144,7 +5412,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             )}
           </div>
 
-          <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+          <div className="flex flex-wrap bg-slate-100 p-1.5 rounded-2xl gap-1">
             <button 
               onClick={() => setActiveAnalysisView('summary')}
               className={cn(
@@ -5189,6 +5457,15 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               )}
             >
               Test Comparison
+            </button>
+            <button 
+              onClick={() => setActiveAnalysisView('center_comparison')}
+              className={cn(
+                "px-5 py-2.5 rounded-xl text-xs font-black transition-all",
+                activeAnalysisView === 'center_comparison' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              Centre Comparison
             </button>
           </div>
         </div>
@@ -5486,6 +5763,26 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                        ))}
                     </div>
                   </div>
+                  {/* Student Type Filter */}
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Student Type</label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                       {['all', 'Hosteller', 'e-Gurukul', 'Day Boarding'].map(t => (
+                         <button 
+                          key={t} 
+                          onClick={() => setFilters((prev: any) => ({ ...prev, studentType: t as any }))}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
+                            (filters.studentType || 'all') === t ? "bg-purple-600 text-white shadow-md shadow-purple-100" : "bg-white text-slate-500 border border-slate-100"
+                          )}
+                         >
+                           {t === 'all' ? 'All Types' : t === 'e-Gurukul' ? 'e-Guru' : t}
+                         </button>
+                       ))}
+                    </div>
+                  </div>
                </div>
                <div className="pt-6 border-t border-slate-200 flex items-center justify-between">
                   <p className="text-[10px] font-bold text-slate-400 uppercase italic">
@@ -5500,6 +5797,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     setSelectedProgramId('');
                     setSelectedCenterId('');
                     setSelectedBatchId('');
+                    setFilters((prev: any) => ({ ...prev, studentType: 'all' }));
                   }} className="text-rose-500 hover:text-rose-600">
                     Clear All Filters
                   </Button>
@@ -7209,6 +7507,608 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           )}
         </div>
       )}
+
+      {activeAnalysisView === 'center_comparison' && (
+        <div className="space-y-8 animate-fade-in print-center-comparison">
+          {/* Dashboard Subheader Switcher */}
+          <div className="bg-slate-50 border border-slate-100 p-4 rounded-3xl flex flex-col md:flex-row items-center justify-between gap-4 print:hidden">
+            <div className="space-y-1">
+              <h2 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-600 animate-pulse"></span>
+                Combined Operations Dashboard
+              </h2>
+              <p className="text-[10px] text-slate-400 font-extrabold uppercase font-sans tracking-wide">
+                Centre Matrix &bull; Max vs Avg Trends &bull; Progression Tracking
+              </p>
+            </div>
+            
+            <div className="flex flex-wrap bg-slate-200/60 p-1 rounded-2xl gap-0.5 animate-fade-in">
+              {[
+                { id: 'all', label: 'All Dashboard Sections' },
+                { id: 'center', label: '🏢 Centre Performance' },
+                { id: 'trends', label: '📈 Max vs Average Trends' },
+                { id: 'progress', label: '👥 Student Progression' }
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  onClick={() => setCenterSubView(sub.id as any)}
+                  className={cn(
+                    "px-4 py-2 rounded-xl text-[11px] font-extrabold transition-all duration-200 cursor-pointer",
+                    centerSubView === sub.id ? "bg-white text-purple-700 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-300/30"
+                  )}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 1. CENTRE PERFORMANCE SECTION */}
+          {(centerSubView === 'all' || centerSubView === 'center') && (
+            <div className="space-y-8 pt-2">
+              <div className="flex items-center justify-between border-b border-indigo-50 pb-2">
+                <h3 className="text-base font-black text-slate-800 tracking-tight flex items-center gap-2">
+                  <span className="bg-indigo-100 text-indigo-700 p-1.5 rounded-lg text-xs">🏢</span>
+                  Centre-wise Performance Matrix
+                </h3>
+                <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase font-mono">
+                  Operational centers stats
+                </span>
+              </div>
+              
+              {/* Extended Operations Insight Board (New Section for More Analysis) */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+                {/* Visual Quad / Insight diagnostic finder */}
+                <Card className="p-6 bg-gradient-to-br from-slate-50 to-white border border-slate-200/60 rounded-[2.2rem] shadow-sm space-y-4 lg:col-span-1">
+                  <div>
+                    <span className="text-[10px] font-black tracking-widest text-indigo-600 uppercase font-sans flex items-center gap-1">
+                      <Target size={12} /> Diagnostic Quadrant Analysis
+                    </span>
+                    <h4 className="text-sm font-black text-slate-705 mt-1">Operational Health Indicators</h4>
+                  </div>
+                  
+                  <div className="space-y-3 pt-2">
+                    {/* Consistently High Achievers */}
+                    <div className="bg-emerald-50/40 p-3 rounded-2xl border border-emerald-100/50">
+                      <h5 className="text-[11px] font-black text-emerald-800 uppercase tracking-tight flex items-center gap-1">
+                        🏆 High-Efficiency Centers
+                      </h5>
+                      <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Average accuracy exceeding 70%</span>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(() => {
+                          const highAchievers = centerComparisonData.filter(c => c.avgAccuracy >= 70);
+                          return highAchievers.length > 0 ? (
+                            highAchievers.slice(0, 3).map((c, i) => (
+                              <span key={i} className="text-[10px] font-black bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-100">{c.centerName}</span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-slate-400 italic">No centers matching diagnostic criteria currently.</span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Support centers */}
+                    <div className="bg-rose-50/40 p-3 rounded-2xl border border-rose-100/50">
+                      <h5 className="text-[11px] font-black text-rose-800 uppercase tracking-tight flex items-center gap-1">
+                        ⚠️ Attention &amp; Support Required
+                      </h5>
+                      <span className="text-[10px] text-slate-400 font-semibold block mt-0.5">Average accuracy lower than 60%</span>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {(() => {
+                          const supportRequired = centerComparisonData.filter(c => c.avgAccuracy < 60 && c.avgAccuracy > 0);
+                          return supportRequired.length > 0 ? (
+                            supportRequired.slice(0, 3).map((c, i) => (
+                              <span key={i} className="text-[10px] font-black bg-rose-50 text-rose-700 px-2 py-0.5 rounded border border-rose-100">{c.centerName}</span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 font-extrabold">All centers stable &bull; Accuracy check passed</span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Toppers Across Centers Leaderboard */}
+                <Card className="p-6 bg-white border border-slate-100 rounded-[2.2rem] shadow-sm space-y-4 lg:col-span-2">
+                  <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                    <div>
+                      <span className="text-[10px] font-black tracking-widest text-[#a855f7] uppercase font-sans">Cross-Centre Leaderboard</span>
+                      <h4 className="text-sm font-black text-slate-800">Elite Competitors Standings</h4>
+                    </div>
+                    <Badge variant="blue">Top Scorers</Badge>
+                  </div>
+                  <div className="overflow-y-auto max-h-[196px] no-scrollbar">
+                    <table className="w-full text-xs text-left">
+                      <thead>
+                        <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
+                          <th className="pb-2">Student Name</th>
+                          <th className="pb-2 text-center font-sans text-slate-400">Center Location</th>
+                          <th className="pb-2 text-center font-sans text-slate-400">Achieved Score</th>
+                          <th className="pb-2 text-right font-sans text-slate-400">Academic Acc %</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-sans text-xs">
+                        {outstandingCandidates.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="py-6 text-center text-slate-400 italic font-sans animate-pulse">No candidates parsed. Try adjusting active filters.</td>
+                          </tr>
+                        ) : (
+                          outstandingCandidates.slice(0, 4).map((cand, i) => (
+                            <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-2.5 font-sans">
+                                <div className="font-bold text-slate-900 text-xs">{cand.studentName}</div>
+                                <div className="text-[9.5px] font-semibold text-slate-400 font-mono">{cand.regNo}</div>
+                              </td>
+                              <td className="py-2.5 text-center text-slate-500 font-bold font-sans">{cand.centerName}</td>
+                              <td className="py-2.5 text-center font-black text-purple-700 font-sans">
+                                {cand.score} <span className="text-[9px] font-normal text-slate-400 font-sans">/{cand.maxScore}</span>
+                              </td>
+                              <td className="py-2.5 text-right font-black text-emerald-650 font-mono">
+                                {Math.round(cand.accuracy)}%
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
+
+              {/* Top Summary Widget Row */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="p-6 bg-gradient-to-br from-indigo-50 to-white border border-indigo-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-indigo-500 uppercase font-sans">Active Centers</span>
+                <h3 className="text-4xl font-extrabold text-slate-900 mt-2 font-sans tracking-tight">{centerComparisonData.length}</h3>
+              </div>
+              <p className="text-xs font-semibold text-slate-400 mt-4 leading-relaxed">Aggregated operational centers participating in selected examinations.</p>
+            </Card>
+            <Card className="p-6 bg-gradient-to-br from-emerald-50 to-white border border-emerald-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-emerald-500 uppercase font-sans">Top Performing Center</span>
+                <h3 className="text-2xl font-extrabold text-slate-900 mt-2 font-sans tracking-tight truncate">
+                  {centerComparisonData[0]?.centerName || '—'}
+                </h3>
+              </div>
+              <p className="text-xs font-semibold text-slate-400 mt-4 leading-relaxed">
+                Achieved highest performance with average core score of <strong className="text-emerald-600">{centerComparisonData[0]?.avgScore || 0}</strong>.
+              </p>
+            </Card>
+            <Card className="p-6 bg-gradient-to-br from-purple-50 to-white border border-purple-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-purple-500 uppercase font-sans">Global Score Range</span>
+                <h3 className="text-2xl font-extrabold text-slate-900 mt-2 font-sans tracking-tight">
+                  {centerComparisonData.length > 0 ? `${Math.min(...centerComparisonData.filter(c => c.avgScore > 0).map(c => c.avgScore)) || 0} - ${Math.max(...centerComparisonData.map(c => c.avgScore)) || 0}` : '—'}
+                </h3>
+              </div>
+              <p className="text-xs font-semibold text-slate-400 mt-4 leading-relaxed">Spread of average scores across all participating centers.</p>
+            </Card>
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-4">
+              <div>
+                <h3 className="font-black text-lg text-slate-900 tracking-tight">Center Average Score Comparison</h3>
+                <p className="text-xs text-slate-400 font-medium">Ranked score averages per center</p>
+              </div>
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={centerComparisonData} margin={{ top: 10, right: 10, left: -25, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="centerName" tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                    <YAxis tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                    <RechartsTooltip 
+                      contentStyle={{ background: '#0f172a', borderRadius: '1rem', border: 'none', color: '#fff', fontSize: '11px', fontWeight: 'bold' }} 
+                      itemStyle={{ color: '#38bdf8' }}
+                    />
+                    <Bar dataKey="avgScore" fill="#3b82f6" radius={[6, 6, 0, 0]} name="Average Score" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+            <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-4">
+              <div>
+                <h3 className="font-black text-lg text-slate-900 tracking-tight">Accuracy vs Max Performance Matrix</h3>
+                <p className="text-xs text-slate-400 font-medium font-sans">Average Accuracy % compared to Topper's Score</p>
+              </div>
+              <div className="h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={centerComparisonData} margin={{ top: 10, right: 10, left: -25, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="centerName" tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                    <YAxis yAxisId="left" tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                    <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#10b981" />
+                    <RechartsTooltip 
+                      contentStyle={{ background: '#0f172a', borderRadius: '1rem', border: 'none', color: '#fff', fontSize: '11px', fontWeight: 'bold' }} 
+                    />
+                    <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                    <Bar yAxisId="left" dataKey="maxScore" fill="#a855f7" radius={[6, 6, 0, 0]} name="Highest Score" />
+                    <Line yAxisId="right" type="monotone" dataKey="avgAccuracy" stroke="#10b981" strokeWidth={3} name="Avg. Accuracy (%)" dot={{ r: 4 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          </div>
+
+          {/* Directory Grid */}
+          <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-6">
+            <div>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">Center Breakdown Directory</h3>
+              <p className="text-xs text-slate-400 font-medium font-sans">Detailed performance statistics parsed across centers</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/20">
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Academic Center</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Topper Score</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Class Average</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Avg. Accuracy %</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Test Attempts</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Unique Students</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-sans">
+                  {centerComparisonData.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-12 text-xs font-semibold text-slate-400 italic">
+                        No center performance records found. Try adjusting active filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    centerComparisonData.map((c, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-4 font-extrabold text-sm text-slate-900">{c.centerName}</td>
+                        <td className="px-5 py-4 text-center font-black text-purple-600 text-sm">{c.maxScore}</td>
+                        <td className="px-5 py-4 text-center font-black text-blue-600 text-sm">{c.avgScore}</td>
+                        <td className="px-5 py-4 text-center font-extrabold text-[#10b981] text-xs">
+                          <span className="bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-[6px]">{c.avgAccuracy}% Acc</span>
+                        </td>
+                        <td className="px-5 py-4 text-center font-bold text-slate-500 text-xs">{c.totalAttempts}</td>
+                        <td className="px-5 py-4 text-right font-bold text-slate-500 text-xs">{c.uniqueStudents}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+            </div>
+          )}
+
+          {/* 2. MAX VS AVERAGE SCORE TREND SECTION */}
+          {(centerSubView === 'all' || centerSubView === 'trends') && (
+            <div className="space-y-8 pt-4 animate-fade-in">
+              <div className="flex items-center justify-between border-b border-indigo-50 pb-2">
+                <h3 className="text-base font-black text-slate-800 tracking-tight flex items-center gap-2">
+                  <span className="bg-blue-100 text-blue-700 p-1.5 rounded-lg text-xs">📈</span>
+                  Chronological Score Dispersion (Topper vs Class Averages)
+                </h3>
+                <span className="text-[10px] font-black tracking-wider text-slate-400 uppercase font-mono">
+                  Test progression tracking
+                </span>
+              </div>
+          {/* Top Summary Widgets */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="p-6 bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-blue-500 uppercase font-sans">Tests Analyzed</span>
+                <h3 className="text-4xl font-extrabold text-slate-900 mt-2 font-sans tracking-tight">{testMaxAvgData.length}</h3>
+              </div>
+              <p className="text-xs font-semibold text-slate-400 mt-4 leading-relaxed">Chronological examination sequences loaded in database.</p>
+            </Card>
+            <Card className="p-6 bg-gradient-to-br from-rose-50 to-white border border-rose-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-black tracking-widest text-rose-500 uppercase font-sans">Highest Single Score Achieved</span>
+                <h3 className="text-4xl font-extrabold text-[#e11d48] mt-2 font-sans tracking-tight">
+                  {testMaxAvgData.length > 0 ? Math.max(...testMaxAvgData.map(t => t.maxScore)) : 0}
+                </h3>
+              </div>
+              <p className="text-xs font-semibold text-slate-400 mt-4 leading-relaxed">Peak score achieved by a top candidate across all selected tests.</p>
+            </Card>
+          </div>
+
+          {/* Test Performance Trend Chart */}
+          <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-4">
+            <div>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">Maximum vs. Average Score Trend</h3>
+              <p className="text-xs text-slate-400 font-medium font-sans">Topper (Max Score) vs. Class Average over examinations trajectory</p>
+            </div>
+            <div className="h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={testMaxAvgData} margin={{ top: 15, right: 20, left: -20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="testName" tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                  <YAxis tick={{ fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} stroke="#94a3b8" />
+                  <RechartsTooltip 
+                    contentStyle={{ background: '#0f172a', borderRadius: '1rem', border: 'none', color: '#fff', fontSize: '11px', fontWeight: 'bold' }} 
+                  />
+                  <Legend wrapperStyle={{ fontSize: '10px', fontWeight: 'bold' }} />
+                  <Line type="monotone" dataKey="maxScore" stroke="#ec4899" strokeWidth={3} name="Topper Max Score" activeDot={{ r: 8 }} dot={{ r: 5 }} />
+                  <Line type="monotone" dataKey="avgScore" stroke="#3b82f6" strokeWidth={3} name="Class Average Score" dot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+
+          {/* Table Breakdown */}
+          <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-6">
+            <div>
+              <h3 className="font-black text-xl text-slate-900 tracking-tight">Examination Statistics Directory</h3>
+              <p className="text-xs text-slate-400 font-medium font-sans">Topper of class score compared with global median benchmarks</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/20">
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Examination Name</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Date</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Topper (Max Score)</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Class Average Score</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Avg. Test Accuracy</th>
+                    <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Student Attendance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-sans">
+                  {testMaxAvgData.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="text-center p-12 text-xs font-semibold text-slate-400 italic">
+                        No test records matching active filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    testMaxAvgData.map((t, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-4 font-extrabold text-sm text-slate-900">{t.testName}</td>
+                        <td className="px-5 py-4 text-center text-xs font-bold text-slate-400 font-mono">{t.testDate}</td>
+                        <td className="px-5 py-4 text-center font-black text-pink-600 text-sm">{t.maxScore}</td>
+                        <td className="px-5 py-4 text-center font-black text-blue-600 text-sm">{t.avgScore}</td>
+                        <td className="px-5 py-4 text-center">
+                          <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded">
+                            {t.avgAccuracy}% Accuracy
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-right font-bold text-slate-500 text-xs">{t.attendance} Attendees</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+            </div>
+          )}
+
+          {/* 3. STUDENT PROGRESSION SECTION */}
+          {(centerSubView === 'all' || centerSubView === 'progress') && (() => {
+        const { list, progressedCount, declinedCount, stableCount, singleTestCount } = studentProgressData;
+        const totalWithHistory = progressedCount + declinedCount + stableCount;
+        
+        let improvementPercent = totalWithHistory > 0 ? Math.round((progressedCount / totalWithHistory) * 100) : 0;
+
+        const pieData = [
+          { name: 'Progressed', value: progressedCount, color: '#10b981' },
+          { name: 'Declined', value: declinedCount, color: '#ef4444' },
+          { name: 'Stable', value: stableCount, color: '#f59e0b' }
+        ].filter(d => d.value > 0);
+
+        return (
+          <div className="space-y-8 animate-fade-in">
+            {/* Top Stat Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <Card className="p-6 bg-gradient-to-br from-emerald-50 to-white border border-emerald-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-[#10b981] uppercase font-sans">Progressed / Improved</span>
+                  <p className="text-xs text-slate-400 font-semibold mt-1 font-sans">Change higher than +5 marks</p>
+                  <h3 className="text-4xl font-extrabold text-emerald-600 mt-3 font-sans tracking-tight">{progressedCount}</h3>
+                </div>
+                <div className="text-[10px] font-black uppercase text-emerald-600 mt-4 tracking-wider">
+                  {improvementPercent}% of compared
+                </div>
+              </Card>
+              <Card className="p-6 bg-gradient-to-br from-rose-50 to-white border border-rose-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-[#ef4444] uppercase font-sans">Decline / Critical Needs</span>
+                  <p className="text-xs text-slate-400 font-semibold mt-1 font-sans">Score dropped more than -5 marks</p>
+                  <h3 className="text-4xl font-extrabold text-rose-600 mt-3 font-sans tracking-tight">{declinedCount}</h3>
+                </div>
+                <div className="text-[10px] font-black uppercase text-rose-600 mt-4 tracking-wider">
+                  {totalWithHistory > 0 ? Math.round((declinedCount / totalWithHistory) * 100) : 0}% of compared
+                </div>
+              </Card>
+              <Card className="p-6 bg-gradient-to-br from-amber-50 to-white border border-amber-100 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-[#f59e0b] uppercase font-sans">Stable Performers</span>
+                  <p className="text-xs text-slate-400 font-semibold mt-1 font-sans">Marginal change within ±5 marks</p>
+                  <h3 className="text-4xl font-extrabold text-amber-500 mt-3 font-sans tracking-tight">{stableCount}</h3>
+                </div>
+                <div className="text-[10px] font-black uppercase text-amber-500 mt-4 tracking-wider">
+                  {totalWithHistory > 0 ? Math.round((stableCount / totalWithHistory) * 100) : 0}% of compared
+                </div>
+              </Card>
+              <Card className="p-6 bg-slate-50 border border-slate-150 rounded-[2.2rem] shadow-sm flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase font-sans">Single Test Taken</span>
+                  <p className="text-xs text-slate-400 font-semibold mt-1 font-sans">No comparison history available</p>
+                  <h3 className="text-4xl font-extrabold text-slate-500 mt-3 font-sans tracking-tight">{singleTestCount}</h3>
+                </div>
+                <div className="text-[10px] font-black uppercase text-slate-400 mt-4 tracking-wider">
+                  Awaiting second capture
+                </div>
+              </Card>
+            </div>
+
+            {/* Progression Distribution Chart */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm flex flex-col justify-between lg:col-span-1">
+                <div>
+                  <h3 className="font-black text-lg text-slate-900 tracking-tight text-center lg:text-left">Student Status Ratio</h3>
+                  <p className="text-xs text-slate-400 font-medium text-center lg:text-left">Distribution split of matched student progression states</p>
+                </div>
+                {pieData.length === 0 ? (
+                  <div className="text-center py-20 text-xs italic text-slate-400 font-sans">No comparisons available</div>
+                ) : (
+                  <div className="h-64 w-full flex flex-col justify-center">
+                    <div className="h-44">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={pieData}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={55}
+                            outerRadius={75}
+                            paddingAngle={5}
+                            dataKey="value"
+                          >
+                            {pieData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-4 text-[10px] font-black uppercase tracking-wider font-sans mt-4">
+                      {pieData.map((d, i) => (
+                        <div key={i} className="flex items-center gap-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
+                          <span className="text-slate-600">{d.name} ({d.value})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Card>
+
+              {/* Top Improvers & Support List side-by-side */}
+              <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm lg:col-span-2 space-y-6">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div>
+                    <h3 className="font-black text-lg text-slate-900 tracking-tight">Steepest Trends Tracking</h3>
+                    <p className="text-xs text-slate-400 font-medium font-sans">Students sorted by score progress margin</p>
+                  </div>
+                  <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-full tracking-wider font-sans">
+                    TRACKING {totalWithHistory} COMPARED CANDIDATES
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* High Improvers */}
+                  <div className="space-y-3">
+                    <h4 className="text-[11px] font-black tracking-widest text-[#10b981] uppercase font-sans border-b border-emerald-50 pb-2">🚀 Top Academic Improvers</h4>
+                    <div className="space-y-2 max-h-56 overflow-y-auto no-scrollbar">
+                      {list.filter(s => s.status === 'Progressed').slice(0, 5).map((s, i) => (
+                        <div key={i} className="flex justify-between items-center bg-emerald-50/20 border border-emerald-50/50 p-2.5 rounded-xl font-sans text-xs">
+                          <div>
+                            <div className="font-extrabold text-slate-900">{s.studentName}</div>
+                            <div className="text-[10px] font-bold text-slate-400 font-mono mt-0.5">{s.regNo}</div>
+                          </div>
+                          <div className="text-right font-black text-[#10b981]">
+                            <span>+{s.change} pts</span>
+                            <span className="text-[9px] block text-slate-400 font-normal">({s.firstScore} → {s.lastScore})</span>
+                          </div>
+                        </div>
+                      ))}
+                      {list.filter(s => s.status === 'Progressed').length === 0 && (
+                        <p className="text-slate-400 text-xs italic py-2">No students registered an increased score over comparison.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* support list (steepest drops) */}
+                  <div className="space-y-3">
+                    <h4 className="text-[11px] font-black tracking-widest text-[#ef4444] uppercase font-sans border-b border-rose-50 pb-2">⚠️ Steepest Academic Drops</h4>
+                    <div className="space-y-2 max-h-56 overflow-y-auto no-scrollbar">
+                      {[...list].filter(s => s.status === 'Declined').reverse().slice(0, 5).map((s, i) => (
+                        <div key={i} className="flex justify-between items-center bg-rose-50/20 border border-rose-50/50 p-2.5 rounded-xl font-sans text-xs">
+                          <div>
+                            <div className="font-extrabold text-slate-900">{s.studentName}</div>
+                            <div className="text-[10px] font-bold text-slate-400 font-mono mt-0.5">{s.regNo}</div>
+                          </div>
+                          <div className="text-right font-black text-[#ef4444]">
+                            <span>{s.change} pts</span>
+                            <span className="text-[9px] block text-slate-400 font-normal">({s.firstScore} → {s.lastScore})</span>
+                          </div>
+                        </div>
+                      ))}
+                      {list.filter(s => s.status === 'Declined').length === 0 && (
+                        <p className="text-slate-400 text-xs italic py-2">No student performance declines recorded. Great job!</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            {/* Progression Directory Table */}
+            <Card className="p-8 bg-white border border-slate-100 rounded-[2.5rem] shadow-sm space-y-6">
+              <div>
+                <h3 className="font-black text-xl text-slate-900 tracking-tight">Full Student Progression Directory</h3>
+                <p className="text-xs text-slate-400 font-medium font-sans">Complete registry tracking of candidate trends alphabetically</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse font-sans">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50/20">
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Candidate</th>
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center font-sans">First Score</th>
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center font-sans">Last Score</th>
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center font-sans">Performance Margin</th>
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center font-sans">Tests Taken</th>
+                      <th className="px-5 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right font-sans">Status Badge</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-sans text-xs">
+                    {list.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="text-center p-12 text-xs font-semibold text-slate-400 italic">
+                          No student records found to track.
+                        </td>
+                      </tr>
+                    ) : (
+                      list.map((s, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-5 py-4">
+                            <div className="font-extrabold text-sm text-slate-900">{s.studentName}</div>
+                            <div className="text-[10px] font-semibold text-slate-400 mt-1">{s.regNo} | {s.centerName} • {s.batchName}</div>
+                          </td>
+                          <td className="px-5 py-4 text-center font-bold text-slate-500">{s.firstScore}</td>
+                          <td className="px-5 py-4 text-center font-bold text-slate-500">{s.lastScore}</td>
+                          <td className={cn(
+                            "px-5 py-4 text-center font-black text-sm",
+                            s.change > 5 ? "text-emerald-600" :
+                            s.change < -5 ? "text-rose-600" :
+                            "text-slate-500"
+                          )}>
+                            {s.change > 0 ? `+${s.change}` : s.change}
+                          </td>
+                          <td className="px-5 py-4 text-center font-bold text-slate-500">{s.attemptsCount} tests</td>
+                          <td className="px-5 py-4 text-right">
+                            <span className={cn(
+                              "px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider font-sans",
+                              s.status === 'Progressed' ? "bg-emerald-50 text-emerald-700 border border-emerald-100" :
+                              s.status === 'Declined' ? "bg-rose-50 text-rose-700 border border-rose-100" :
+                              s.status === 'Stable' ? "bg-amber-50 text-amber-700 border border-amber-100" :
+                              "bg-slate-50 text-slate-400 border border-slate-100"
+                            )}>
+                              {s.status === 'Single Test' ? 'Single Test' : s.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
+        </div>
+      )}
         </>
       )}
     </div>
@@ -7389,12 +8289,27 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
 
   const sortedTopicStats = useMemo(() => {
     if (!normalizedResult.topicStats) return [];
-    let list = Object.entries(normalizedResult.topicStats).map(([id, stats]: [string, any]) => ({
-      id,
-      ...stats,
-      topicName: qbgTopics[id]?.topic || id,
-      accuracy: (stats.total > 0 ? (stats.correct / stats.total) * 100 : 0)
-    }));
+    
+    let rawStats: any[] = [];
+    if (Array.isArray(normalizedResult.topicStats)) {
+      rawStats = normalizedResult.topicStats;
+    } else {
+      rawStats = Object.entries(normalizedResult.topicStats).map(([key, value]: [string, any]) => ({
+        name: key,
+        ...value
+      }));
+    }
+
+    let list = rawStats.map((stats: any, index: number) => {
+      const name = stats.name || stats.topic || '';
+      const topicName = qbgTopics[name]?.topic || name || `Topic ${index + 1}`;
+      return {
+        id: name || String(index),
+        ...stats,
+        topicName,
+        accuracy: (stats.total > 0 ? (stats.correct / stats.total) * 100 : 0)
+      };
+    });
 
     if (topicSort) {
       list.sort((a: any, b: any) => {
