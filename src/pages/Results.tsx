@@ -7107,6 +7107,27 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   </button>
                 </div>
 
+                {/* Anchor / Current Test Dropdown */}
+                <div className="flex items-center gap-1.5 bg-slate-800/80 p-1.5 rounded-xl border border-slate-700 font-sans">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2 select-none font-mono">
+                    Anchor/Filter Test:
+                  </span>
+                  <select
+                    value={selectedCompTestId}
+                    onChange={(e) => {
+                      setSelectedCompTestId(e.target.value);
+                    }}
+                    className="bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider h-7 rounded-lg px-2.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer max-w-[210px] sm:max-w-[250px] truncate"
+                  >
+                    <option value="">Latest Test ({comparisonGridData.chronTests[0]?.testDate || '—'})</option>
+                    {comparisonGridData.chronTests.map((t: any) => (
+                      <option key={t.testId} value={t.testId}>
+                        {t.testDate ? `[${t.testDate}] ` : ''}{t.testName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Explicit Export Names Opt Toggle Selector */}
                 <div className="flex items-center gap-1 bg-slate-800 border border-slate-700/80 rounded-xl p-1 shadow-sm font-sans mr-2">
                   <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-2 select-none font-mono">
