@@ -6966,20 +6966,25 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 border: 1px solid #cbd5e1 !important;
               }
 
-              /* Strip left student column and header stickiness to avoid clipping on print pages */
+              /* Strip left student column and header stickiness to avoid clipping or overlapping shifts on print pages */
+              .print-comparison-matrix thead,
+              .print-comparison-matrix tr,
+              .print-comparison-matrix th,
+              .print-comparison-matrix td,
               .print-comparison-matrix th.sticky,
               .print-comparison-matrix td.sticky,
               .print-comparison-matrix .sticky {
-                position: relative !important;
+                position: static !important;
+                top: auto !important;
+                bottom: auto !important;
                 left: auto !important;
-                background-color: #f8fafc !important;
-                color: #0d1526 !important;
+                right: auto !important;
                 box-shadow: none !important;
               }
               
               .print-comparison-matrix tr {
                 page-break-inside: avoid !important;
-                border-bottom: 2px solid #94a3b8 !important;
+                border-bottom: 2px solid #64748b !important;
               }
 
               /* Explicit solid light gray grid borders for standard laser printing */
@@ -6991,15 +6996,27 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
               .print-comparison-matrix td,
               .print-comparison-matrix th {
-                border: 1px solid #94a3b8 !important;
-                padding: 5px 3px !important;
+                border: 1px solid #cbd5e1 !important;
+                padding: 10px 8px !important;
                 text-align: center !important;
-                font-size: 9px !important;
+                vertical-align: middle !important;
+                font-size: 9.5px !important;
+              }
+
+              .print-comparison-matrix th {
+                background-color: #f1f5f9 !important;
+                color: #0f172a !important;
+                font-weight: 900 !important;
+              }
+
+              .print-comparison-matrix td {
+                background-color: #ffffff !important;
+                color: #1e293b !important;
               }
 
               .print-comparison-matrix td:first-child {
                 text-align: left !important;
-                font-size: 10px !important;
+                font-size: 10.5px !important;
                 font-weight: 800 !important;
               }
             }
@@ -7270,10 +7287,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden">
                 <div className="overflow-x-auto overflow-y-auto max-h-[750px] relative">
                   <table className="w-full border-collapse text-xs text-left">
-                    <thead>
+                    <thead className="sticky top-0 z-30 shadow-md">
                        {/* First Row Header Groups */}
-                      <tr className="bg-[#0b1329] text-white border-b border-slate-800 sticky top-0 z-40">
-                        <th rowSpan={2} className="px-6 py-5 border-r-[3.5px] border-r-amber-700/80 align-middle min-w-[260px] sticky left-0 top-0 bg-[#0b1329] z-50 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
+                      <tr className="bg-[#0b1329] text-white border-b border-slate-800">
+                        <th rowSpan={2} className="px-6 py-5 border-r-[3.5px] border-r-amber-700/80 align-middle min-w-[260px] sticky left-0 bg-[#0b1329] z-50 shadow-[4px_0_10px_rgba(0,0,0,0.2)]">
                           <div className="text-xs font-black uppercase tracking-widest font-mono text-blue-400">Student Profile</div>
                           <div className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5 font-mono">Roll-No / Program Batch</div>
                         </th>
@@ -7284,7 +7301,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               key={testMeta.testId} 
                               colSpan={isMedicalProgram ? 6 : 5} 
                               className={cn(
-                                "px-4 py-3 text-center border-r-[3.5px] border-r-amber-700/80 font-extrabold tracking-widest uppercase text-[10px] font-mono sticky top-0 z-30",
+                                "px-4 py-3 text-center border-r-[3.5px] border-r-amber-700/80 font-extrabold tracking-widest uppercase text-[10px] font-mono",
                                 idx === 0 ? "bg-[#0b1c3a] text-blue-200" : "bg-[#0f172a] text-slate-300"
                               )}
                             >
@@ -7303,10 +7320,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                       </tr>
 
                       {/* Second Row Header Sub-columns */}
-                      <tr className="bg-[#121b33] text-slate-200 border-b border-slate-750 font-bold uppercase tracking-wider text-[9px] font-mono sticky top-[64px] z-30">
+                      <tr className="bg-[#121b33] text-slate-200 border-b border-slate-750 font-bold uppercase tracking-wider text-[9px] font-mono">
                         {displayedTests.map((testMeta) => (
                           <React.Fragment key={testMeta.testId}>
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 bg-[#121b33] font-bold">
                               <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Physics</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
@@ -7319,7 +7336,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </div>
                             </th>
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 bg-[#121b33] font-bold">
                               <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Chemistry</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
@@ -7334,7 +7351,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             </th>
                             {isMedicalProgram ? (
                               <>
-                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 bg-[#121b33] font-bold">
                                   <div className="text-[9.5px] tracking-wider uppercase text-blue-300 font-black">Botany</div>
                                   <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none">
                                     <div className="flex justify-between px-0.5 items-center">
@@ -7347,7 +7364,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                     </div>
                                   </div>
                                 </th>
-                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 bg-[#121b33] font-bold">
                                   <div className="text-[9.5px] tracking-wider uppercase text-blue-300 font-black">Zoology</div>
                                   <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none">
                                     <div className="flex justify-between px-0.5 items-center">
@@ -7362,7 +7379,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </th>
                               </>
                             ) : (
-                              <th className="p-2.5 text-center border-r border-slate-700 min-w-[100px] text-emerald-300 sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                              <th className="p-2.5 text-center border-r border-slate-700 min-w-[100px] text-emerald-300 bg-[#121b33] font-bold">
                                 <div className="text-[9.5px] tracking-wider uppercase text-emerald-300 font-black">Mathematics</div>
                                 <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-emerald-400/80 space-y-0.5 font-extrabold normal-case select-none">
                                   <div className="flex justify-between px-0.5 items-center">
@@ -7376,7 +7393,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </th>
                             )}
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[115px] text-white sticky top-[64px] bg-[#121b33] z-30 font-bold">
+                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[115px] text-white bg-[#121b33] font-bold">
                               <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Cumulative Marks</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
@@ -7389,7 +7406,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </div>
                             </th>
-                            <th className="p-2.5 text-center border-r-[3.5px] border-r-amber-700/80 min-w-[75px] text-amber-400 bg-[#0d1427] sticky top-[64px] z-30 font-bold">
+                            <th className="p-2.5 text-center border-r-[3.5px] border-r-amber-700/80 min-w-[75px] text-amber-400 bg-[#0d1427] font-bold">
                               <div className="text-[9.5px] tracking-wider uppercase font-black">Rank</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8px] leading-tight text-slate-400 font-extrabold normal-case select-none text-center">
                                 Test Rank
@@ -7446,18 +7463,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               if (!testRes) {
                                 return (
                                   <React.Fragment key={testMeta.testId}>
-                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
-                                    <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    <td className="p-3 text-center align-middle border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                    <td className="p-3 text-center align-middle border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
                                     {isMedicalProgram ? (
                                       <>
-                                        <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
-                                        <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                        <td className="p-3 text-center align-middle border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                        <td className="p-3 text-center align-middle border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
                                       </>
                                     ) : (
-                                      <td className="p-3 text-center border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
+                                      <td className="p-3 text-center align-middle border-r border-slate-100 text-slate-300 font-mono font-medium bg-slate-50/20">—</td>
                                     )}
-                                    <td className="p-3 text-center border-r border-slate-100 bg-slate-50/30 text-slate-350 italic font-medium font-sans text-[10px]">Absent</td>
-                                    <td className="p-3 text-center border-r-[3.5px] border-r-amber-700/70 bg-slate-50/40 text-slate-350 font-mono font-medium">—</td>
+                                    <td className="p-3 text-center align-middle border-r border-slate-100 bg-slate-50/30 text-slate-400 italic font-medium font-sans text-[10px]">Absent</td>
+                                    <td className="p-3 text-center align-middle border-r-[3.5px] border-r-amber-700/70 bg-slate-50/40 text-slate-400 font-mono font-medium">—</td>
                                   </React.Fragment>
                                 );
                               }
@@ -7477,12 +7494,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               return (
                                 <React.Fragment key={testMeta.testId}>
                                   {/* Physics */}
-                                  <td className="p-3 text-center border-r border-slate-200 font-black text-slate-805 text-sm font-sans hover:bg-slate-55/40 transition-colors">
+                                  <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
                                     {testRes.isAbsent ? '—' : phScore}
                                   </td>
 
                                   {/* Chemistry */}
-                                  <td className="p-3 text-center border-r border-slate-200 font-black text-slate-805 text-sm font-sans hover:bg-slate-55/40 transition-colors">
+                                  <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
                                     {testRes.isAbsent ? '—' : chScore}
                                   </td>
 
@@ -7490,18 +7507,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   {isMedicalProgram ? (
                                     <>
                                       {/* Botany Cell */}
-                                      <td className="p-3 text-center border-r border-slate-200 font-black text-slate-805 text-sm font-sans hover:bg-slate-55/40 transition-colors">
+                                      <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
                                         {testRes.isAbsent ? '—' : botScore}
                                       </td>
 
                                       {/* Zoology Cell */}
-                                      <td className="p-3 text-center border-r border-slate-200 font-black text-slate-805 text-sm font-sans hover:bg-slate-55/40 transition-colors">
+                                      <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
                                         {testRes.isAbsent ? '—' : zooScore}
                                       </td>
                                     </>
                                   ) : (
                                     /* Math Cell */
-                                    <td className="p-3 text-center border-r border-slate-200 font-black text-slate-805 text-sm font-sans hover:bg-slate-55/40 transition-colors">
+                                    <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
                                       {testRes.isAbsent ? '—' : mathScore}
                                     </td>
                                   )}
@@ -7509,7 +7526,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   {/* All Detail */}
                                   <td 
                                     className={cn(
-                                      "p-3 text-center border-r border-slate-200 bg-blue-50/10 min-w-[105px] transition-colors relative group/cumulative-cell",
+                                      "p-3 text-center align-middle border-r border-slate-200 bg-blue-50/10 min-w-[105px] transition-colors relative group/cumulative-cell",
                                       !testRes.isAbsent && "cursor-pointer hover:bg-blue-100/60"
                                     )}
                                     onClick={() => {
@@ -7547,7 +7564,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                                 onPrintResult(testRes);
                                               }}
                                               title="Print PDF Scorecard"
-                                              className="mt-1 py-0.5 px-2 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans"
+                                              className="mt-1 py-0.5 px-2 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans print:hidden"
                                             >
                                               <FileText size={10} strokeWidth={2.5} className="text-red-500" />
                                               <span className="text-[8.5px] font-black uppercase text-red-600 tracking-tight">PDF</span>
@@ -7559,8 +7576,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   </td>
                                   {/* Rank */}
                                   <td className={cn(
-                                    "p-3 text-center border-r-[3.5px] border-r-amber-700/70 font-black font-sans text-xs transition-colors",
-                                    testRes.isAbsent ? "text-slate-300 bg-slate-50/40" :
+                                    "p-3 text-center align-middle border-r-[3.5px] border-r-amber-700/70 font-black font-sans text-xs transition-colors",
+                                    testRes.isAbsent ? "text-slate-305 bg-slate-50/40" :
                                     testRes.rank === 1 ? "bg-amber-100/70 text-amber-800" :
                                     testRes.rank === 2 ? "bg-slate-100 text-slate-600" :
                                     testRes.rank === 3 ? "bg-orange-100/70 text-orange-850" :
