@@ -3821,6 +3821,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [allCompResults, setAllCompResults] = useState<any[]>([]);
   const [isLoadingAllComp, setIsLoadingAllComp] = useState(false);
   const [comparisonTestMode, setComparisonTestMode] = useState<'current' | 'two' | 'three' | 'all'>('three');
+  const [selectedCompTestId, setSelectedCompTestId] = useState<string>('');
 
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
@@ -4918,11 +4919,20 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   }, [allCompResults, selectedProgramId, selectedCenterId, selectedBatchId, studentSearch, tests, qbgMap]);
 
   const displayedTests = useMemo(() => {
-    if (comparisonTestMode === 'current') return comparisonGridData.chronTests.slice(0, 1);
-    if (comparisonTestMode === 'two') return comparisonGridData.chronTests.slice(0, 2);
-    if (comparisonTestMode === 'three') return comparisonGridData.chronTests.slice(0, 3);
-    return comparisonGridData.chronTests; // 'all'
-  }, [comparisonGridData.chronTests, comparisonTestMode]);
+    const testsList = comparisonGridData.chronTests;
+    let startIndex = 0;
+    if (selectedCompTestId) {
+      const idx = testsList.findIndex(t => t.testId === selectedCompTestId);
+      if (idx !== -1) {
+        startIndex = idx;
+      }
+    }
+    
+    if (comparisonTestMode === 'current') return testsList.slice(startIndex, startIndex + 1);
+    if (comparisonTestMode === 'two') return testsList.slice(startIndex, startIndex + 2);
+    if (comparisonTestMode === 'three') return testsList.slice(startIndex, startIndex + 3);
+    return testsList.slice(startIndex); // 'all'
+  }, [comparisonGridData.chronTests, comparisonTestMode, selectedCompTestId]);
 
   const testWiseStats = useMemo(() => {
     const statsMap: Record<string, {
@@ -7191,7 +7201,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t border-slate-800">
               {/* Search input inside panel */}
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 font-mono">Search Student:</label>
@@ -7242,6 +7252,26 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   <option value="">All Program Batches</option>
                   {metaBatches.filter((b: any) => !selectedProgramId || b.programId === selectedProgramId).map((b: any) => (
                     <option key={b.id} value={b.id}>{b.batchCode || b.batchName}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Anchor / Current Test Dropdown */}
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest pl-1 font-mono">Current Test Date & Name:</label>
+                <select
+                  value={selectedCompTestId}
+                  onChange={(e) => {
+                    setSelectedCompTestId(e.target.value);
+                    setComparisonTestMode('current'); // auto switch to view selected current test
+                  }}
+                  className="w-full h-10 bg-slate-800 text-white px-3 text-xs font-bold rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="">Latest Test ({comparisonGridData.chronTests[0]?.testDate || '—'})</option>
+                  {comparisonGridData.chronTests.map((t: any) => (
+                    <option key={t.testId} value={t.testId}>
+                      {t.testDate ? `[${t.testDate}] ` : ''}{t.testName}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -7320,12 +7350,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                       </tr>
 
                       {/* Second Row Header Sub-columns */}
-                      <tr className="bg-[#121b33] text-slate-200 border-b border-slate-750 font-bold uppercase tracking-wider text-[9px] font-mono">
+                      <tr className="bg-[#121b33] text-slate-200 border-b border-slate-755 font-bold uppercase tracking-wider text-[9px] font-mono">
                         {displayedTests.map((testMeta) => (
                           <React.Fragment key={testMeta.testId}>
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 bg-[#121b33] font-bold">
-                              <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Physics</div>
-                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-extrabold normal-case select-none">
+                            <th className="p-2.5 text-center border-r border-slate-705 min-w-[110px] text-slate-300 bg-[#121b33] font-bold">
+                              <div className="text-[10px] font-extrabold uppercase tracking-widest text-[#f59e0b] bg-[#f59e0b]/10 border border-[#f59e0b]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Physics</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
                                   <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
                                   <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Physics?.max ?? '—'}</span>
@@ -7336,9 +7366,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </div>
                             </th>
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-slate-300 bg-[#121b33] font-bold">
-                              <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Chemistry</div>
-                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-400 space-y-0.5 font-extrabold normal-case select-none">
+                            <th className="p-2.5 text-center border-r border-slate-705 min-w-[110px] text-slate-300 bg-[#121b33] font-bold">
+                              <div className="text-[10px] font-extrabold uppercase tracking-widest text-[#2dd4bf] bg-[#2dd4bf]/10 border border-[#2dd4bf]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Chemistry</div>
+                              <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
                                   <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
                                   <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Chemistry?.max ?? '—'}</span>
@@ -7351,8 +7381,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             </th>
                             {isMedicalProgram ? (
                               <>
-                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 bg-[#121b33] font-bold">
-                                  <div className="text-[9.5px] tracking-wider uppercase text-blue-300 font-black">Botany</div>
+                                <th className="p-2.5 text-center border-r border-slate-705 min-w-[110px] text-blue-350 bg-[#121b33] font-bold">
+                                  <div className="text-[10px] font-extrabold uppercase tracking-widest text-[#10b981] bg-[#10b981]/10 border border-[#10b981]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Botany</div>
                                   <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none">
                                     <div className="flex justify-between px-0.5 items-center">
                                       <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
@@ -7364,8 +7394,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                     </div>
                                   </div>
                                 </th>
-                                <th className="p-2.5 text-center border-r border-slate-700 min-w-[95px] text-blue-300 bg-[#121b33] font-bold">
-                                  <div className="text-[9.5px] tracking-wider uppercase text-blue-300 font-black">Zoology</div>
+                                <th className="p-2.5 text-center border-r border-slate-705 min-w-[110px] text-blue-350 bg-[#121b33] font-bold">
+                                  <div className="text-[10px] font-extrabold uppercase tracking-widest text-[#a3e635] bg-[#a3e635]/10 border border-[#a3e635]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Zoology</div>
                                   <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none">
                                     <div className="flex justify-between px-0.5 items-center">
                                       <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
@@ -7379,9 +7409,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </th>
                               </>
                             ) : (
-                              <th className="p-2.5 text-center border-r border-slate-700 min-w-[100px] text-emerald-300 bg-[#121b33] font-bold">
-                                <div className="text-[9.5px] tracking-wider uppercase text-emerald-300 font-black">Mathematics</div>
-                                <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-emerald-400/80 space-y-0.5 font-extrabold normal-case select-none">
+                              <th className="p-2.5 text-center border-r border-slate-705 min-w-[115px] text-emerald-350 bg-[#121b33] font-bold">
+                                <div className="text-[10px] font-extrabold uppercase tracking-widest text-[#38bdf8] bg-[#38bdf8]/10 border border-[#38bdf8]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Mathematics</div>
+                                <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-emerald-400/80 space-y-0.5 font-extrabold normal-case select-none font-bold">
                                   <div className="flex justify-between px-0.5 items-center">
                                     <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
                                     <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Math?.max ?? '—'}</span>
@@ -7393,8 +7423,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </th>
                             )}
-                            <th className="p-2.5 text-center border-r border-slate-700 min-w-[115px] text-white bg-[#121b33] font-bold">
-                              <div className="text-[9.5px] tracking-wider uppercase text-slate-100 font-black">Cumulative Marks</div>
+                            <th className="p-2.5 text-center border-r border-slate-705 min-w-[130px] text-white bg-[#121b33] font-bold">
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#ea580c] bg-[#ea580c]/10 border border-[#ea580c]/50 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Cumulative</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8.5px] leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
                                 <div className="flex justify-between px-0.5 items-center">
                                   <span className="text-slate-400 text-[7.5px] font-bold uppercase">MAX:</span>
@@ -7406,8 +7436,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 </div>
                               </div>
                             </th>
-                            <th className="p-2.5 text-center border-r-[3.5px] border-r-amber-700/80 min-w-[75px] text-amber-400 bg-[#0d1427] font-bold">
-                              <div className="text-[9.5px] tracking-wider uppercase font-black">Rank</div>
+                            <th className="p-2.5 text-center border-r-[3.5px] border-r-amber-700/80 min-w-[80px] text-amber-400 bg-[#0d1427] font-bold">
+                              <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#facc15] bg-[#facc15]/10 border border-[#facc15]/40 px-2.5 py-1 rounded-full inline-block mb-1 shadow-sm">Rank</div>
                               <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8px] leading-tight text-slate-400 font-extrabold normal-case select-none text-center">
                                 Test Rank
                               </div>
@@ -7494,32 +7524,97 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               return (
                                 <React.Fragment key={testMeta.testId}>
                                   {/* Physics */}
-                                  <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
-                                    {testRes.isAbsent ? '—' : phScore}
+                                  <td className="p-3 text-center align-middle border-r border-slate-200 hover:bg-slate-50 transition-colors">
+                                    {testRes.isAbsent ? (
+                                      <span className="text-slate-300 font-mono">—</span>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        <div className="font-extrabold text-[#0f172a] text-sm font-sans">{phScore}</div>
+                                        <div className="flex justify-center items-center gap-1 text-[9.5px] font-bold font-mono">
+                                          <span className="text-emerald-600" title="Correct">C:{getRawSubjectObj(testRes, 'Physics')?.correct ?? 0}</span>
+                                          <span className="text-slate-300 font-normal">|</span>
+                                          <span className="text-rose-500" title="Wrong">W:{getRawSubjectObj(testRes, 'Physics')?.wrong ?? getRawSubjectObj(testRes, 'Physics')?.incorrect ?? 0}</span>
+                                          <span className="text-slate-300 font-normal">|</span>
+                                          <span className="text-slate-500" title="Unattempted">U:{getRawSubjectObj(testRes, 'Physics')?.blank ?? getRawSubjectObj(testRes, 'Physics')?.unattempted ?? 0}</span>
+                                        </div>
+                                      </div>
+                                    )}
                                   </td>
 
                                   {/* Chemistry */}
-                                  <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
-                                    {testRes.isAbsent ? '—' : chScore}
+                                  <td className="p-3 text-center align-middle border-r border-slate-200 hover:bg-slate-50 transition-colors">
+                                    {testRes.isAbsent ? (
+                                      <span className="text-slate-300 font-mono">—</span>
+                                    ) : (
+                                      <div className="space-y-1">
+                                        <div className="font-extrabold text-[#0f172a] text-sm font-sans">{chScore}</div>
+                                        <div className="flex justify-center items-center gap-1 text-[9.5px] font-bold font-mono">
+                                          <span className="text-emerald-600" title="Correct">C:{getRawSubjectObj(testRes, 'Chemistry')?.correct ?? 0}</span>
+                                          <span className="text-slate-300 font-normal">|</span>
+                                          <span className="text-rose-500" title="Wrong">W:{getRawSubjectObj(testRes, 'Chemistry')?.wrong ?? getRawSubjectObj(testRes, 'Chemistry')?.incorrect ?? 0}</span>
+                                          <span className="text-slate-300 font-normal">|</span>
+                                          <span className="text-slate-500" title="Unattempted">U:{getRawSubjectObj(testRes, 'Chemistry')?.blank ?? getRawSubjectObj(testRes, 'Chemistry')?.unattempted ?? 0}</span>
+                                        </div>
+                                      </div>
+                                    )}
                                   </td>
 
                                   {/* Botany & Zoology or Maths */}
                                   {isMedicalProgram ? (
                                     <>
                                       {/* Botany Cell */}
-                                      <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
-                                        {testRes.isAbsent ? '—' : botScore}
+                                      <td className="p-3 text-center align-middle border-r border-slate-200 hover:bg-slate-50 transition-colors">
+                                        {testRes.isAbsent ? (
+                                          <span className="text-slate-300 font-mono">—</span>
+                                        ) : (
+                                          <div className="space-y-1">
+                                            <div className="font-extrabold text-[#0f172a] text-sm font-sans">{botScore}</div>
+                                            <div className="flex justify-center items-center gap-1 text-[9.5px] font-bold font-mono">
+                                              <span className="text-emerald-600" title="Correct">C:{getRawSubjectObj(testRes, 'Botany')?.correct ?? 0}</span>
+                                              <span className="text-slate-300 font-normal">|</span>
+                                              <span className="text-rose-500" title="Wrong">W:{getRawSubjectObj(testRes, 'Botany')?.wrong ?? getRawSubjectObj(testRes, 'Botany')?.incorrect ?? 0}</span>
+                                              <span className="text-slate-300 font-normal">|</span>
+                                              <span className="text-slate-500" title="Unattempted">U:{getRawSubjectObj(testRes, 'Botany')?.blank ?? getRawSubjectObj(testRes, 'Botany')?.unattempted ?? 0}</span>
+                                            </div>
+                                          </div>
+                                        )}
                                       </td>
 
                                       {/* Zoology Cell */}
-                                      <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
-                                        {testRes.isAbsent ? '—' : zooScore}
+                                      <td className="p-3 text-center align-middle border-r border-slate-200 hover:bg-slate-50 transition-colors">
+                                        {testRes.isAbsent ? (
+                                          <span className="text-slate-300 font-mono">—</span>
+                                        ) : (
+                                          <div className="space-y-1">
+                                            <div className="font-extrabold text-[#0f172a] text-sm font-sans">{zooScore}</div>
+                                            <div className="flex justify-center items-center gap-1 text-[9.5px] font-bold font-mono">
+                                              <span className="text-emerald-600" title="Correct">C:{getRawSubjectObj(testRes, 'Zoology')?.correct ?? 0}</span>
+                                              <span className="text-slate-300 font-normal">|</span>
+                                              <span className="text-rose-500" title="Wrong">W:{getRawSubjectObj(testRes, 'Zoology')?.wrong ?? getRawSubjectObj(testRes, 'Zoology')?.incorrect ?? 0}</span>
+                                              <span className="text-slate-300 font-normal">|</span>
+                                              <span className="text-slate-500" title="Unattempted">U:{getRawSubjectObj(testRes, 'Zoology')?.blank ?? getRawSubjectObj(testRes, 'Zoology')?.unattempted ?? 0}</span>
+                                            </div>
+                                          </div>
+                                        )}
                                       </td>
                                     </>
                                   ) : (
                                     /* Math Cell */
-                                    <td className="p-3 text-center align-middle border-r border-slate-200 font-black text-slate-800 text-sm font-sans hover:bg-slate-50 transition-colors">
-                                      {testRes.isAbsent ? '—' : mathScore}
+                                    <td className="p-3 text-center align-middle border-r border-slate-200 hover:bg-slate-50 transition-colors">
+                                      {testRes.isAbsent ? (
+                                        <span className="text-slate-300 font-mono">—</span>
+                                      ) : (
+                                        <div className="space-y-1">
+                                          <div className="font-extrabold text-[#0f172a] text-sm font-sans">{mathScore}</div>
+                                          <div className="flex justify-center items-center gap-1 text-[9.5px] font-bold font-mono">
+                                            <span className="text-emerald-600" title="Correct">C:{getRawSubjectObj(testRes, 'Math')?.correct ?? 0}</span>
+                                            <span className="text-slate-300 font-normal">|</span>
+                                            <span className="text-rose-500" title="Wrong">W:{getRawSubjectObj(testRes, 'Math')?.wrong ?? getRawSubjectObj(testRes, 'Math')?.incorrect ?? 0}</span>
+                                            <span className="text-slate-300 font-normal">|</span>
+                                            <span className="text-slate-500" title="Unattempted">U:{getRawSubjectObj(testRes, 'Math')?.blank ?? getRawSubjectObj(testRes, 'Math')?.unattempted ?? 0}</span>
+                                          </div>
+                                        </div>
+                                      )}
                                     </td>
                                   )}
 
@@ -7539,13 +7634,20 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                     {testRes.isAbsent ? (
                                       <span className="text-slate-300 italic text-[10px] font-sans">Absent</span>
                                     ) : (
-                                      <div className="space-y-1">
+                                      <div className="space-y-1.5">
                                         <div className="font-extrabold text-slate-900 tracking-tighter group-hover/cumulative-cell:text-blue-700 transition-colors">
                                           <span className="text-sm font-black text-slate-900 font-sans">{scoreVal}</span>
                                           <span className="text-[10px] font-bold text-slate-400 font-sans">/{maxScoreVal}</span>
                                         </div>
                                         <div className="text-[10.5px] font-extrabold text-[#10b981] leading-none font-sans">
                                           {accuracyVal} Acc
+                                        </div>
+                                        <div className="flex justify-center items-center gap-1 text-[9.5px] font-extrabold font-mono py-0.5 px-1.5 bg-white/80 border border-slate-200 rounded text-slate-700 shadow-2xs mx-auto max-w-[95px]">
+                                          <span className="text-emerald-600" title="Total Correct">C:{testRes.correct ?? 0}</span>
+                                          <span className="text-slate-350 font-semibold font-sans">|</span>
+                                          <span className="text-rose-500" title="Total Wrong/Incorrect">W:{testRes.wrong ?? testRes.incorrect ?? 0}</span>
+                                          <span className="text-slate-350 font-semibold font-sans">|</span>
+                                          <span className="text-slate-500" title="Total Unattempted">U:{testRes.blank ?? testRes.unattempted ?? 0}</span>
                                         </div>
                                         <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
                                           {(() => {
