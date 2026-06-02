@@ -5331,6 +5331,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         )}
         
         <div className="flex flex-wrap items-center gap-3">
+          <Button 
+            variant={isFilterVisible ? "secondary" : "outline"}
+            size="md" 
+            onClick={() => setIsFilterVisible(!isFilterVisible)}
+            className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
+          >
+            <Filter size={18} className={cn("mr-2", isFilterVisible ? "text-blue-600" : "text-slate-400")} />
+            {isFilterVisible ? "Hide Filters" : "Filters"}
+          </Button>
+
           <Button variant="outline" size="md" onClick={handleExportGlobal} className="border-slate-200">
             <Download size={18} className="mr-2 text-emerald-600" />
             Export CSV
@@ -5537,112 +5547,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         </div>
       </header>
 
-      {/* ALWAYS VISIBLE Direct Academic Context Selector Bar */}
-      <div className="flex flex-col lg:flex-row items-center justify-between gap-6 p-6 md:p-8 bg-slate-50 border border-slate-100 rounded-[2rem] text-left">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full lg:w-auto lg:min-w-[750px] flex-1">
-           {/* Direct Program Selector */}
-           <div className="space-y-2">
-             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Division (Program)</label>
-             <Select 
-               value={selectedProgramId} 
-               onChange={e => {
-                 const newProgId = e.target.value;
-                 setSelectedProgramId(newProgId);
-                 setSelectedBatchId('');
-                 
-                 if (onSelectAllTests) {
-                   let filteredTests = tests;
-                   if (newProgId) {
-                     filteredTests = tests.filter((t: any) => t.programId === newProgId);
-                   } else if (metaPrograms && metaPrograms.length > 0) {
-                     const firstId = metaPrograms[0].id;
-                     filteredTests = tests.filter((t: any) => t.programId === firstId);
-                   }
-                   onSelectAllTests(filteredTests.map((t: any) => t.id));
-                 }
-               }}
-               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
-             >
-               <option value="">All Divisions</option>
-               {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
-                 <option key={p.id} value={p.id}>{p.programName}</option>
-               ))}
-             </Select>
-           </div>
-
-           {/* Direct Center Selector */}
-           <div className="space-y-2">
-             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
-             <Select 
-               value={selectedCenterId} 
-               onChange={e => {
-                 setSelectedCenterId(e.target.value);
-                 setSelectedBatchId('');
-               }}
-               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
-             >
-               <option value="">All Centers</option>
-               {metaCenters.filter((c: any) => {
-                  if (!c.isActive) return false;
-                  if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
-                    const allowed = centerId.split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
-                    return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
-                  }
-                  return true;
-                }).map((c: any) => (
-                  <option key={c.id} value={c.id}>{c.centerName}</option>
-                ))}
-             </Select>
-           </div>
-
-           {/* Direct Batch Selector */}
-           <div className="space-y-2">
-             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Class Batch</label>
-             <Select 
-               value={selectedBatchId} 
-               onChange={e => {
-                 const newBatchId = e.target.value;
-                 setSelectedBatchId(newBatchId);
-                 
-                 if (onSelectAllTests) {
-                   let filteredTests = tests;
-                   if (newBatchId) {
-                     filteredTests = tests.filter((t: any) => t.batchIds?.includes(newBatchId));
-                   } else if (selectedProgramId) {
-                     filteredTests = tests.filter((t: any) => t.programId === selectedProgramId);
-                   } else if (metaPrograms && metaPrograms.length > 0) {
-                     const firstId = metaPrograms[0].id;
-                     filteredTests = tests.filter((t: any) => t.programId === firstId);
-                   }
-                   onSelectAllTests(filteredTests.map((t: any) => t.id));
-                 }
-               }}
-               className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
-             >
-               <option value="">All Batches</option>
-               {metaBatches.filter((b: any) => 
-                 b.isActive && 
-                 (!selectedProgramId || b.programId === selectedProgramId) &&
-                 (!selectedCenterId || b.centerId === selectedCenterId)
-               ).map((b: any) => (
-                 <option key={b.id} value={b.id}>{b.batchName} ({b.batchCode})</option>
-               ))}
-             </Select>
-           </div>
-        </div>
-
-        <div className="flex items-center gap-3 self-end lg:self-center">
-          <Button 
-            variant="secondary" 
-            size="sm" 
-            onClick={() => setIsFilterVisible(!isFilterVisible)}
-            className={cn("bg-white border border-slate-200/80 rounded-xl px-4 h-11 font-bold text-xs shadow-sm whitespace-nowrap", isFilterVisible && "bg-slate-900 text-white")}
-          >
-            <Filter size={14} className="mr-2" />
-            {isFilterVisible ? "Hide Filters" : "More Filters"}
-          </Button>
-        </div>
-      </div>
+      {/* ALWAYS VISIBLE Direct Academic Context Selector Bar has been moved into the collapsible Filters panel below to maximize screen space */}
 
       <AnimatePresence>
         {isFilterVisible && (
@@ -5653,6 +5558,98 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             className="overflow-hidden"
           >
             <Card className="p-8 border-slate-100 bg-slate-50/50 space-y-8 rounded-[2rem]">
+               {/* Primary Academic Context Selectors */}
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-6 border-b border-slate-200">
+                  {/* Direct Program Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Division (Program)</label>
+                    <Select 
+                      value={selectedProgramId} 
+                      onChange={e => {
+                        const newProgId = e.target.value;
+                        setSelectedProgramId(newProgId);
+                        setSelectedBatchId('');
+                        
+                        if (onSelectAllTests) {
+                          let filteredTests = tests;
+                          if (newProgId) {
+                            filteredTests = tests.filter((t: any) => t.programId === newProgId);
+                          } else if (metaPrograms && metaPrograms.length > 0) {
+                            const firstId = metaPrograms[0].id;
+                            filteredTests = tests.filter((t: any) => t.programId === firstId);
+                          }
+                          onSelectAllTests(filteredTests.map((t: any) => t.id));
+                        }
+                      }}
+                      className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+                    >
+                      <option value="">All Divisions</option>
+                      {metaPrograms.filter((p: any) => p.isActive).map((p: any) => (
+                        <option key={p.id} value={p.id}>{p.programName}</option>
+                      ))}
+                    </Select>
+                  </div>
+
+                  {/* Direct Center Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Center</label>
+                    <Select 
+                      value={selectedCenterId} 
+                      onChange={e => {
+                        setSelectedCenterId(e.target.value);
+                        setSelectedBatchId('');
+                      }}
+                      className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+                    >
+                      <option value="">All Centers</option>
+                      {metaCenters.filter((c: any) => {
+                         if (!c.isActive) return false;
+                         if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
+                           const allowed = centerId.split(',').map(id => id.trim().toLowerCase()).filter(Boolean);
+                           return allowed.includes(String(c.id).toLowerCase()) || allowed.includes(String(c.centerName || '').toLowerCase());
+                         }
+                         return true;
+                       }).map((c: any) => (
+                         <option key={c.id} value={c.id}>{c.centerName}</option>
+                       ))}
+                    </Select>
+                  </div>
+
+                  {/* Direct Batch Selector */}
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Class Batch</label>
+                    <Select 
+                      value={selectedBatchId} 
+                      onChange={e => {
+                        const newBatchId = e.target.value;
+                        setSelectedBatchId(newBatchId);
+                        
+                        if (onSelectAllTests) {
+                          let filteredTests = tests;
+                          if (newBatchId) {
+                            filteredTests = tests.filter((t: any) => t.batchIds?.includes(newBatchId));
+                          } else if (selectedProgramId) {
+                            filteredTests = tests.filter((t: any) => t.programId === selectedProgramId);
+                          } else if (metaPrograms && metaPrograms.length > 0) {
+                            const firstId = metaPrograms[0].id;
+                            filteredTests = tests.filter((t: any) => t.programId === firstId);
+                          }
+                          onSelectAllTests(filteredTests.map((t: any) => t.id));
+                        }
+                      }}
+                      className="rounded-xl border-slate-200/80 font-bold bg-white h-11 text-xs w-full shadow-sm"
+                    >
+                      <option value="">All Batches</option>
+                      {metaBatches.filter((b: any) => 
+                        b.isActive && 
+                        (!selectedProgramId || b.programId === selectedProgramId) &&
+                        (!selectedCenterId || b.centerId === selectedCenterId)
+                      ).map((b: any) => (
+                        <option key={b.id} value={b.id}>{b.batchName} ({b.batchCode})</option>
+                      ))}
+                    </Select>
+                  </div>
+               </div>
                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                   {/* Test Filter */}
                   <div className="space-y-4">
