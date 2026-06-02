@@ -3802,6 +3802,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const { role, centerId, batchIds } = useAuth();
+  const [exportWithName, setExportWithName] = useState<boolean>(true);
   const [activeAnalysisView, setActiveAnalysisView] = useState<'summary' | 'question' | 'topic' | 'student' | 'comparison' | 'center_comparison' | 'test_max_avg' | 'student_progress'>('summary');
   const [centerSubView, setCenterSubView] = useState<'all' | 'center' | 'trends' | 'progress'>('all');
   const [studentType, setStudentType] = useState<'all' | 'Hosteller' | 'Day Boarding' | 'e-Gurukul'>('all');
@@ -8203,6 +8204,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
   const { role } = useAuth();
   const isAdmin = role === 'admin' || role === 'operator' || role === 'central_team' || role === 'central';
   const { qbgMap: qbgTopics } = useMetadata();
+  const [exportWithName, setExportWithName] = useState<boolean>(true);
   const [test, setTest] = useState<any>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState<string>('');
@@ -8561,7 +8563,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
     const totalUnattempted = result.isAbsent ? 0 : (result.blank ?? (computedMax - totalCorrect - totalWrong));
 
     const row = {
-      'Student Name': result.studentName,
+      'Student Name': exportWithName ? result.studentName : `STUDENT_${result.regNo || 'ANON'}`,
       'Registration No': result.regNo,
       'Center': sCenter,
       'Batch': sBatch,
@@ -8614,7 +8616,8 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${result.studentName}_Result_${new Date().getTime()}.csv`);
+    const sNameForFile = exportWithName ? result.studentName : `STUDENT_${result.regNo || 'ANON'}`;
+    link.setAttribute('download', `${sNameForFile}_Result_${new Date().getTime()}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -8692,6 +8695,33 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
 
       {/* Toolbar Section moved from header for cleaner look */}
       <div className="flex flex-wrap items-center justify-end gap-3 bg-white/50 backdrop-blur-sm p-2 rounded-2xl border border-slate-100/50 print:hidden">
+          {/* Explicit Export Names Opt Toggle Selector for ResultDetail */}
+          <div className="flex items-center gap-1 bg-slate-50 border border-slate-100/80 rounded-xl p-1 shadow-sm font-sans h-9">
+            <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-2 select-none font-mono">
+              Names:
+            </span>
+            <button
+              type="button"
+              onClick={() => setExportWithName(true)}
+              className={cn(
+                "px-2 py-0.5 text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer rounded-md h-full flex items-center",
+                exportWithName ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              Include
+            </button>
+            <button
+              type="button"
+              onClick={() => setExportWithName(false)}
+              className={cn(
+                "px-2 py-0.5 text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer rounded-md h-full flex items-center",
+                !exportWithName ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-400 hover:text-slate-600"
+              )}
+            >
+              Anonymize
+            </button>
+          </div>
+
           <Button variant="outline" size="sm" onClick={handleExportDetail} className="border-slate-200 h-9">
             <Download size={14} className="mr-2 text-emerald-600" />
             <span className="text-xs uppercase tracking-wider font-bold">Export CSV</span>
