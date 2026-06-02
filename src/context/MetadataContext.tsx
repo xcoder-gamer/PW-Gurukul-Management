@@ -157,6 +157,9 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
           if (ch.topics) {
             Object.entries(ch.topics).forEach(([tId, t]: any) => {
               map[tId] = { topic: t.name, chapter: ch.name, subject: sName };
+              map[`${chId}_${tId}`] = { topic: t.name, chapter: ch.name, subject: sName };
+              map[`${ch.name}_${tId}`] = { topic: t.name, chapter: ch.name, subject: sName };
+              map[`${sId}_${chId}_${tId}`] = { topic: t.name, chapter: ch.name, subject: sName };
               qbgList.push({ 
                 name: t.name, 
                 type: 'topic', 
@@ -170,6 +173,9 @@ export function MetadataProvider({ children }: { children: React.ReactNode }) {
               if (t.subtopics) {
                 Object.entries(t.subtopics).forEach(([stId, st]: any) => {
                   map[stId] = { topic: st.name, chapter: ch.name, subject: sName };
+                  map[`${tId}_${stId}`] = { topic: st.name, chapter: ch.name, subject: sName };
+                  map[`${chId}_${tId}_${stId}`] = { topic: st.name, chapter: ch.name, subject: sName };
+                  map[`${sId}_${chId}_${tId}_${stId}`] = { topic: st.name, chapter: ch.name, subject: sName };
                   qbgList.push({ 
                     name: st.name, 
                     type: 'subtopic', 

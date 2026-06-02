@@ -256,7 +256,12 @@ const evaluateResult = (studentAnswers: Record<string, string>, answerKey: any, 
     else if (subLower === 'botany') subject = 'Botany';
     else if (subLower === 'zoology') subject = 'Zoology';
     else if (subLower === 'biology') subject = 'Biology';
-    const topic = (qbgMap || {})[topicId]?.topic || qData.topic || topicId || '';
+    const topic = (qbgMap || {})[`${chapterId}_${topicId}`]?.topic || 
+                  (qbgMap || {})[`${chap}_${topicId}`]?.topic || 
+                  (qbgMap || {})[`${subjectId}_${chapterId}_${topicId}`]?.topic || 
+                  (qbgMap || {})[topicId]?.topic || 
+                  qData.topic || 
+                  topicId || '';
     const diff = normalizedDifficulty;
 
     if (!chapterStats[chap]) {
@@ -745,7 +750,12 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
       mapped.forEach((ev: any) => {
         const sName = ev.subject || 'N/A';
         const cName = ev.chapter || 'N/A';
-        const tName = qbgMap?.[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
+        const tName = qbgMap?.[`${ev.chapterId}_${ev.topicId}`]?.topic ||
+                      qbgMap?.[`${ev.chapter}_${ev.topicId}`]?.topic ||
+                      qbgMap?.[`${ev.subjectId}_${ev.chapterId}_${ev.topicId}`]?.topic ||
+                      qbgMap?.[ev.topicId]?.topic || 
+                      ev.topic || 
+                      ev.topicId || 'N/A';
         const comboKey = `${sName} - ${cName} - ${tName}`;
         if (!conceptScores[comboKey]) {
           conceptScores[comboKey] = {
@@ -1239,6 +1249,7 @@ export default function Results() {
   const [isProcessingBulk, setIsProcessingBulk] = useState(false);
   const [isSyncingGlobal, setIsSyncingGlobal] = useState(false);
   const [resultsSortConfig, setResultsSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+  const [exportWithName, setExportWithName] = useState<boolean>(true);
   const [filters, setFilters] = useState({
     minAccuracy: 0,
     minMathAccuracy: 0,
@@ -2182,7 +2193,7 @@ export default function Results() {
       return {
         'Rank': res.rank,
         'Reg No.': res.regNo,
-        'Student Name': res.studentName,
+        'Student Name': exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`,
         'Center': res.centerName || '—',
         'Batch': res.batchName || '—',
         'Total Score': res.score,
@@ -2342,6 +2353,33 @@ export default function Results() {
                 </button>
               )}
             </div>
+            {/* Elegant Name Export Selector Segment */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-2xl p-1 shadow-sm">
+              <span className="text-[9.5px] font-black text-slate-400 uppercase tracking-wider pl-2 select-none font-mono">
+                Names:
+              </span>
+              <button
+                type="button"
+                onClick={() => setExportWithName(true)}
+                className={cn(
+                  "px-2.5 py-1 text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                  exportWithName ? "bg-blue-600 text-white rounded-xl shadow-sm" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                With Name
+              </button>
+              <button
+                type="button"
+                onClick={() => setExportWithName(false)}
+                className={cn(
+                  "px-2.5 py-1 text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                  !exportWithName ? "bg-amber-500 text-slate-950 rounded-xl shadow-sm" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                Without Name
+              </button>
+            </div>
+
             <Button variant="outline" size="md" onClick={handleExportCSV} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
               <Download size={18} className="mr-2 text-emerald-600" />
               Export CSV
@@ -2692,7 +2730,9 @@ export default function Results() {
                       >
                         <div className="flex flex-col">
                           <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1.5 group-hover/student-cell:underline">{res.regNo}</span>
-                          <span className="text-sm font-black text-slate-900 leading-snug group-hover/student-cell:text-blue-700 transition-colors">{res.studentName}</span>
+                          <span className="text-sm font-black text-slate-900 leading-snug group-hover/student-cell:text-blue-700 transition-colors">
+                            {exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`}
+                          </span>
                         </div>
                       </td>
                       {/* Col B: Student Details */}
@@ -3967,7 +4007,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       evaluations.forEach((ev: any) => {
         const sName = ev.subject || 'N/A';
         const cName = ev.chapter || 'N/A';
-        const tName = (qbgMap || {})[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
+        const tName = (qbgMap || {})[`${ev.chapterId}_${ev.topicId}`]?.topic ||
+                      (qbgMap || {})[`${ev.chapter}_${ev.topicId}`]?.topic ||
+                      (qbgMap || {})[`${ev.subjectId}_${ev.chapterId}_${ev.topicId}`]?.topic ||
+                      (qbgMap || {})[ev.topicId]?.topic || 
+                      ev.topic || 
+                      ev.topicId || 'N/A';
         const dName = ev.difficulty || 'Normal';
         const pName = ev.paper || 'N/A';
 
@@ -4117,7 +4162,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         for (const ev of att.mappedEvaluation) {
           const sName = ev.subject || 'N/A';
           const cName = ev.chapter || 'N/A';
-          const tName = (qbgMap || {})[ev.topicId]?.topic || ev.topic || ev.topicId || 'N/A';
+          const tName = (qbgMap || {})[`${ev.chapterId}_${ev.topicId}`]?.topic ||
+                        (qbgMap || {})[`${ev.chapter}_${ev.topicId}`]?.topic ||
+                        (qbgMap || {})[`${ev.subjectId}_${ev.chapterId}_${ev.topicId}`]?.topic ||
+                        (qbgMap || {})[ev.topicId]?.topic || 
+                        ev.topic || 
+                        ev.topicId || 'N/A';
           const comboKey = `${sName} - ${cName} - ${tName}`;
           if (!conceptScores[comboKey]) {
             conceptScores[comboKey] = {
@@ -4947,7 +4997,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       evaluations.forEach((ev: any) => {
         if (ev.subject) s.add(ev.subject);
         if (ev.chapter) c.add(ev.chapter);
-        const name = qbgMap[ev.topicId]?.topic || ev.topic || ev.topicId;
+        const name = qbgMap[`${ev.chapterId}_${ev.topicId}`]?.topic ||
+                     qbgMap[`${ev.chapter}_${ev.topicId}`]?.topic ||
+                     qbgMap[`${ev.subjectId}_${ev.chapterId}_${ev.topicId}`]?.topic ||
+                     qbgMap[ev.topicId]?.topic || 
+                     ev.topic || 
+                     ev.topicId;
         if (name) t.add(name);
       });
     });
@@ -5056,7 +5111,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       }
       exportData = aggregateStats.studentTable.map((s: any) => ({
         'Reg No': s.regNo,
-        'Student Name': s.studentName,
+        'Student Name': exportWithName ? s.studentName : `STUDENT_${s.regNo || 'ANON'}`,
         'Tests Taken': s.testsTaken,
         'Total Score': s.totalScore,
         'Avg Score': s.avgScore,
@@ -5098,7 +5153,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         const testObj = tests.find(t => t.id === testMeta.testId);
 
         const row: any = {
-          'Student Name': student.studentName,
+          'Student Name': exportWithName ? student.studentName : `STUDENT_${student.regNo || 'ANON'}`,
           'Registration No': student.regNo,
           'Center': student.centerName || '—',
           'Batch': student.batchName || '—',
@@ -6163,7 +6218,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                         <td className="px-6 py-5">
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-905 group-hover:text-blue-600 transition-colors flex items-center gap-2">
-                              {s.studentName}
+                              {exportWithName ? s.studentName : `STUDENT_${s.regNo || 'ANON'}`}
                               <span className="text-[9px] text-slate-400 bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded-full transition-colors font-medium">
                                 Analyze Profile ↗
                               </span>
@@ -7027,6 +7082,33 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   </button>
                 </div>
 
+                {/* Explicit Export Names Opt Toggle Selector */}
+                <div className="flex items-center gap-1 bg-slate-800 border border-slate-700/80 rounded-xl p-1 shadow-sm font-sans mr-2">
+                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest pl-2 select-none font-mono">
+                    Names:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setExportWithName(true)}
+                    className={cn(
+                      "px-2.5 py-1 text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer rounded-lg",
+                      exportWithName ? "bg-blue-600 text-white shadow-sm" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Include
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportWithName(false)}
+                    className={cn(
+                      "px-2.5 py-1 text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer rounded-lg",
+                      !exportWithName ? "bg-amber-500 text-slate-950 shadow-sm" : "text-slate-400 hover:text-white"
+                    )}
+                  >
+                    Anonymize
+                  </button>
+                </div>
+
                 {/* Print/Export buttons */}
                 <div className="flex items-center gap-2">
                   <Button
@@ -7322,7 +7404,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300">
                              {/* Student Details sticky first column */}
                             <td className="px-6 py-4.5 border-r-[3.5px] border-r-amber-700/70 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
-                              <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">{studentItem.studentName}</div>
+                              <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">
+                                {exportWithName ? studentItem.studentName : `STUDENT_${studentItem.regNo || 'ANON'}`}
+                              </div>
                               <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                 <span className="font-mono text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                   #{studentItem.regNo}
@@ -8559,7 +8643,9 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
           </button>
           <div className="space-y-1">
             <p className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em] pl-0.5">Final Result & Analytics</p>
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">{result.studentName}</h2>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight leading-none">
+              {exportWithName ? result.studentName : `STUDENT_${result.regNo || 'ANON'}`}
+            </h2>
             <div className="flex flex-wrap items-center gap-3">
                <Badge variant="blue">{result.regNo}</Badge>
                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em]">Rank #{result.rank} • Test ID: {result.testId.slice(-6)}</span>
@@ -8765,7 +8851,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 text-lg leading-none mb-1">
-                    {studentProfile?.name || result.studentName}
+                    {exportWithName ? (studentProfile?.name || result.studentName) : `STUDENT_${result.regNo || 'ANON'}`}
                   </h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{result.regNo} • Student Master Record</p>
                 </div>
