@@ -2736,7 +2736,9 @@ export default function Results() {
                         title="Click to view detailed student analysis"
                       >
                         <div className="flex flex-col">
-                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1 group-hover/student-cell:underline">{res.regNo}</span>
+                          {exportWithName && (
+                            <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1 group-hover/student-cell:underline">{res.regNo}</span>
+                          )}
                           <span className="text-sm font-black text-slate-900 leading-tight group-hover/student-cell:text-blue-700 transition-colors">
                             {exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`}
                           </span>
@@ -2749,10 +2751,12 @@ export default function Results() {
                           <div className="text-xs font-black text-slate-900 leading-tight">
                             {res.programName || '—'}
                           </div>
-                          <div className="text-[10px] font-bold text-slate-400 leading-none">
-                            {res.centerName || '—'}
-                          </div>
-                          {res.type && (
+                          {exportWithName && res.centerName && (
+                            <div className="text-[10px] font-bold text-slate-400 leading-none">
+                              {res.centerName}
+                            </div>
+                          )}
+                          {exportWithName && res.type && (
                             <span className="text-[8px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono select-none mt-0.5">
                               {res.type}
                             </span>
@@ -4641,6 +4645,50 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           return acc;
         }, {});
 
+        // Fetch global comparison results for those same test IDs to get true unfiltered rankings across all centers
+        const compTestIds = Array.from(new Set(resultsList.map(r => r.testId).filter(Boolean))) as string[];
+        const globalComparisonRanks: Record<string, Record<string, number>> = {};
+        if (compTestIds.length > 0) {
+          try {
+            const globalQueries = compTestIds.map(tId => 
+              query(collection(db, 'result_updated'), where('testId', '==', tId))
+            );
+            const globalSnaps = await Promise.all(globalQueries.map(q => getDocs(q)));
+            compTestIds.forEach((tId, idx) => {
+              const snap = globalSnaps[idx];
+              const testGroup = snap.docs.map(doc => doc.data() as any);
+              const sortedGroup = [...testGroup].sort((a: any, b: any) => {
+                if (a.isAbsent && !b.isAbsent) return 1;
+                if (!a.isAbsent && b.isAbsent) return -1;
+                return (b.score || 0) - (a.score || 0);
+              });
+              const ranks: Record<string, number> = {};
+              let currentRank = 1;
+              sortedGroup.forEach((r, gIdx) => {
+                const regStr = r.regNo || '—';
+                const sName = r.studentName || '';
+                const studentKey = `${regStr}_${sName}`;
+                if (r.isAbsent) {
+                  ranks[studentKey] = gIdx + 1;
+                  return;
+                }
+                if (gIdx === 0) {
+                  currentRank = 1;
+                } else {
+                  const prevRes = sortedGroup[gIdx - 1];
+                  if (r.score !== prevRes.score) {
+                    currentRank = gIdx + 1;
+                  }
+                }
+                ranks[studentKey] = currentRank;
+              });
+              globalComparisonRanks[tId] = ranks;
+            });
+          } catch (globalRanksErr) {
+            console.warn("Failed fetching global test results for true rankings:", globalRanksErr);
+          }
+        }
+
         // Dynamically fetch and merge up-to-date student details for any missing student mappings in Comparison view
         const uniqueRegNos = Array.from(new Set(resultsList.map(r => String(r.regNo || '').trim().toUpperCase()).filter(Boolean)));
         const missingRegNos = uniqueRegNos.filter(regNo => !studentMap[regNo] && !studentCache[regNo]);
@@ -4678,6 +4726,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           const regKey = String(res.regNo || '').trim().toUpperCase();
           const studentInfo = studentMap[regKey];
           
+          const regString = res.regNo || '—';
+          const resolvedName = studentInfo ? (studentInfo.name || res.studentName) : res.studentName;
+          const studentKey = `${regString}_${resolvedName}`;
+          // Match by resolved student key or fallback original database student key
+          const trueRankVal = globalComparisonRanks[res.testId]?.[studentKey] || globalComparisonRanks[res.testId]?.[`${regString}_${res.studentName}`] || 1;
+
           if (studentInfo) {
             const bId = studentInfo.batchId || res.batchId;
             const cId = studentInfo.centerId || res.centerId;
@@ -4700,6 +4754,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               type: studentInfo.type || '',
               rankTarget: studentInfo.rankTarget || '',
               targetYear: studentInfo.targetYear || '',
+              trueGlobalRank: trueRankVal,
             };
           } else {
             const batchDetail = findBatchSafely(res.batchId, metaBatches);
@@ -4713,6 +4768,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               batchName: batchDetail?.batchName || res.batchName,
               programId: programDetail?.id || res.programId,
               programName: programDetail?.programName || res.programName,
+              trueGlobalRank: trueRankVal,
             };
           }
         });
@@ -4864,7 +4920,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         };
       }
       
-      const rankVal = globalComparisonTestRanks[res.testId]?.[key] || 1;
+      const rankVal = res.trueGlobalRank || globalComparisonTestRanks[res.testId]?.[key] || 1;
       studentMap[key].testResults[res.testId] = {
         ...res,
         rank: rankVal
@@ -6232,8 +6288,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               </span>
                             </span>
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase">Reg: {s.regNo}</span>
-                              {s.type && (
+                              {exportWithName && (
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Reg: {s.regNo}</span>
+                              )}
+                              {exportWithName && s.type && (
                                 <span className="text-[9px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono animate-none">
                                   {s.type}
                                 </span>
@@ -6252,12 +6310,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                         </td>
                         <td className="px-4 py-2 text-center">
                           <div className="flex flex-col items-center">
-                            <Badge variant="slate" className="bg-white border-slate-200 text-slate-500 font-black whitespace-nowrap text-[10px] py-0 h-4.5">
-                              {s.centerName || '—'}
-                            </Badge>
-                            <span className="text-[9px] font-black text-slate-400 mt-0.5 uppercase tracking-tighter">
-                              {s.batchCode || s.batchName || '—'}
-                            </span>
+                            {exportWithName && s.centerName && (
+                              <Badge variant="slate" className="bg-white border-slate-200 text-slate-500 font-black whitespace-nowrap text-[10px] py-0 h-4.5">
+                                {s.centerName}
+                              </Badge>
+                            )}
+                            {exportWithName && (
+                              <span className="text-[9px] font-black text-slate-400 mt-0.5 uppercase tracking-tighter">
+                                {s.batchCode || s.batchName || '—'}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-2 text-center">
@@ -7473,19 +7535,23 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                               <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">
                                 {exportWithName ? studentItem.studentName : `STUDENT_${studentItem.regNo || 'ANON'}`}
                               </div>
-                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                                <span className="font-mono text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                                  #{studentItem.regNo}
-                                </span>
-                                <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate max-w-[130px]" title={studentItem.batchName}>
-                                  {studentItem.batchName}
-                                </span>
-                              </div>
-                              <div className="text-[8px] text-slate-400 font-extrabold uppercase mt-1 tracking-widest font-mono text-left">{studentItem.centerName}</div>
+                              {exportWithName && (
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                  <span className="font-mono text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                    #{studentItem.regNo}
+                                  </span>
+                                  <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate max-w-[130px]" title={studentItem.batchName}>
+                                    {studentItem.batchName}
+                                  </span>
+                                </div>
+                              )}
+                              {exportWithName && studentItem.centerName && (
+                                <div className="text-[8px] text-slate-400 font-extrabold uppercase mt-1 tracking-widest font-mono text-left">{studentItem.centerName}</div>
+                              )}
                               
-                              {(studentItem.type || studentItem.rankTarget) && (
+                              {((exportWithName && studentItem.type) || studentItem.rankTarget) && (
                                 <div className="flex flex-wrap items-center gap-1 mt-1.5">
-                                  {studentItem.type && (
+                                  {exportWithName && studentItem.type && (
                                     <span className="text-[8px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono">
                                       {studentItem.type}
                                     </span>
@@ -9020,7 +9086,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
                   <h3 className="font-black text-slate-900 text-lg leading-none mb-1">
                     {exportWithName ? (studentProfile?.name || result.studentName) : `STUDENT_${result.regNo || 'ANON'}`}
                   </h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{result.regNo} • Student Master Record</p>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{exportWithName ? `${result.regNo} • ` : ''}Student Master Record</p>
                 </div>
               </div>
               <Badge variant="blue" className="bg-blue-50 text-blue-600 border-none uppercase tracking-widest text-[9px]">Verified Identity</Badge>
@@ -9030,16 +9096,20 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
               <div className="space-y-1">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Academic Program</p>
                 <p className="font-bold text-slate-900 text-xs truncate" title={result.programName}>{result.programName || '—'}</p>
-                <p className="text-[10px] font-black text-blue-600 uppercase truncate mt-0.5" title={result.batchCode || result.batchName}>{result.batchCode || result.batchName || '—'}</p>
+                {exportWithName && (
+                  <p className="text-[10px] font-black text-blue-600 uppercase truncate mt-0.5" title={result.batchCode || result.batchName}>{result.batchCode || result.batchName || '—'}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Center Location</p>
-                <p className="font-bold text-slate-900 text-xs truncate" title={result.centerName}>{result.centerName || '—'}</p>
+                <p className="font-bold text-slate-900 text-xs truncate" title={result.centerName}>{exportWithName ? (result.centerName || '—') : '—'}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Contact Details</p>
-                <p className="text-[11px] font-bold text-slate-800 truncate" title={studentProfile?.email || result.email}>{studentProfile?.email || result.email || 'No email profile'}</p>
-                <p className="text-[11px] font-mono font-bold text-slate-500 mt-0.5">{studentProfile?.phone || result.phone || 'No phone profile'}</p>
+                <p className="text-[11px] font-bold text-slate-800 truncate" title={studentProfile?.email || result.email}>{exportWithName ? (studentProfile?.email || result.email || 'No email profile') : '—'}</p>
+                {exportWithName && (
+                  <p className="text-[11px] font-mono font-bold text-slate-500 mt-0.5">{studentProfile?.phone || result.phone || 'No phone profile'}</p>
+                )}
               </div>
               <div className="space-y-1">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Status & Mode</p>
@@ -9069,13 +9139,13 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
               <div className="space-y-1 pt-3 border-t border-slate-100">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Enrollment Type</p>
                 <span className="text-[8.5px] font-extrabold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 uppercase tracking-wide inline-block mt-0.5">
-                  {studentProfile?.type || result.type || 'Standard'}
+                  {exportWithName ? (studentProfile?.type || result.type || 'Standard') : '—'}
                 </span>
               </div>
               <div className="space-y-1 pt-3 border-t border-slate-100">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Student Gender</p>
                 <p className="font-bold text-slate-800 text-xs capitalize">
-                  {studentProfile?.gender || '—'}
+                  {exportWithName ? (studentProfile?.gender || '—') : '—'}
                 </p>
               </div>
             </div>
