@@ -1125,23 +1125,23 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-50/50">
                   <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest pl-4">
-                    <th className="px-6 py-4">Test Date</th>
-                    <th className="px-6 py-4">Test Series / Chapter Name</th>
-                    <th className="px-6 py-4 text-center">Correct Answers</th>
-                    <th className="px-6 py-4 text-center">Incorrect Answers</th>
-                    <th className="px-6 py-4 text-center">Unattempted</th>
-                    <th className="px-6 py-4 text-center">Max Score</th>
-                    <th className="px-6 py-4 text-center">Score</th>
-                    <th className="px-6 py-4 text-right">Percentage Score</th>
+                    <th className="px-4 py-1.5">Test Date</th>
+                    <th className="px-4 py-1.5">Test Series / Chapter Name</th>
+                    <th className="px-4 py-1.5 text-center">Correct Answers</th>
+                    <th className="px-4 py-1.5 text-center">Incorrect Answers</th>
+                    <th className="px-4 py-1.5 text-center">Unattempted</th>
+                    <th className="px-4 py-1.5 text-center">Max Score</th>
+                    <th className="px-4 py-1.5 text-center">Score</th>
+                    <th className="px-4 py-1.5 text-right">Percentage Score</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {stats.attemptsList.map((att, i) => (
                     <tr key={i} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="px-6 py-4 text-xs font-bold text-slate-500 font-mono">
+                      <td className="px-4 py-1.5 text-xs font-bold text-slate-500 font-mono">
                         {att.testDate}
                       </td>
-                      <td className="px-6 py-4 max-w-[280px]">
+                      <td className="px-4 py-1.5 max-w-[280px]">
                         <p className="text-xs font-black text-slate-800 truncate" title={att.testName}>
                           {att.testName}
                         </p>
@@ -1149,22 +1149,22 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
                           {att.testMode || 'offline'}
                         </Badge>
                       </td>
-                      <td className="px-6 py-4 text-center font-bold text-emerald-600 text-xs font-mono">
+                      <td className="px-4 py-1.5 text-center font-bold text-emerald-600 text-xs font-mono">
                         {att.correct}
                       </td>
-                      <td className="px-6 py-4 text-center font-bold text-rose-500 text-xs font-mono">
+                      <td className="px-4 py-1.5 text-center font-bold text-rose-500 text-xs font-mono">
                         {att.wrong}
                       </td>
-                      <td className="px-6 py-4 text-center font-bold text-slate-400 text-xs font-mono">
+                      <td className="px-4 py-1.5 text-center font-bold text-slate-400 text-xs font-mono">
                         {att.blank}
                       </td>
-                      <td className="px-6 py-4 text-center font-bold text-slate-500 text-xs font-mono">
+                      <td className="px-4 py-1.5 text-center font-bold text-slate-500 text-xs font-mono">
                         {att.maxScore}
                       </td>
-                      <td className="px-6 py-4 text-center font-black text-slate-900 text-sm font-mono0">
+                      <td className="px-4 py-1.5 text-center font-black text-slate-900 text-sm font-mono0">
                         {att.score}
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-1.5 text-right">
                         <Badge className={cn(
                           "text-[10px] font-black font-mono py-1 px-2.5 h-6 rounded-lg",
                           att.percentage >= 70 ? "bg-emerald-100 text-emerald-700" :
@@ -1320,7 +1320,7 @@ export default function Results() {
 
   const sortedResults = useMemo(() => {
     // Standardize results into map format for easiest UI consumption
-    const normalizedResults = results.map(res => {
+    const rawNormalized = results.map(res => {
       const associatedTest = tests.find(t => t.id === res.testId);
       return {
         ...res,
@@ -1339,7 +1339,52 @@ export default function Results() {
           ? res.difficultyStats.reduce((acc: any, d: any) => ({ ...acc, [d.name]: d }), {})
           : res.difficultyStats
       };
-    }).filter(r => {
+    });
+
+    // Calculate standard competition ranks GLOBALLY per testId (before any filtering or permissions are applied)
+    const globalTestGroups: Record<string, any[]> = {};
+    rawNormalized.forEach((r: any) => {
+      if (!globalTestGroups[r.testId]) {
+        globalTestGroups[r.testId] = [];
+      }
+      globalTestGroups[r.testId].push(r);
+    });
+
+    const globalRankMap: Record<string, number> = {};
+    Object.entries(globalTestGroups).forEach(([tId, group]) => {
+      // Sort group by score descending, putting absent students at the bottom
+      const sortedGroup = [...group].sort((a: any, b: any) => {
+        if (a.isAbsent && !b.isAbsent) return 1;
+        if (!a.isAbsent && b.isAbsent) return -1;
+        return (b.score || 0) - (a.score || 0);
+      });
+
+      let currentRank = 1;
+      sortedGroup.forEach((r: any, idx: number) => {
+        if (r.isAbsent) {
+          globalRankMap[r.id] = idx + 1; // Fallback sequential rank
+          return;
+        }
+        if (idx === 0) {
+          currentRank = 1;
+        } else {
+          const prevRes = sortedGroup[idx - 1];
+          if (r.score !== prevRes.score) {
+            currentRank = idx + 1;
+          }
+        }
+        globalRankMap[r.id] = currentRank;
+      });
+    });
+
+    // Attach global rank to the normalized results
+    const normalizedResults = rawNormalized.map((r: any) => ({
+      ...r,
+      rank: globalRankMap[r.id] || 1
+    }));
+
+    // Filter results based on roles and center permissions
+    const permittedResults = normalizedResults.filter(r => {
       if ((role === 'center' || role === 'center_level') && centerId !== 'all') {
         const allowedCentersSet = (() => {
           const ids = centerId ? centerId.split(',').map(s => s.trim().toLowerCase()).filter(Boolean) : [];
@@ -1368,7 +1413,7 @@ export default function Results() {
       return true;
     });
 
-    let filtered = [...normalizedResults];
+    let filtered = [...permittedResults];
 
     if (searchTerm) {
       const search = searchTerm.toLowerCase();
@@ -1461,50 +1506,12 @@ export default function Results() {
       }
       return (b.score || 0) - (a.score || 0);
     });
-    
-    // Calculate standard competition ranks per testId
-    const testGroups: Record<string, any[]> = {};
-    filtered.forEach((r: any) => {
-      if (!testGroups[r.testId]) {
-        testGroups[r.testId] = [];
-      }
-      testGroups[r.testId].push(r);
-    });
-
-    const rankMap: Record<string, number> = {};
-    Object.entries(testGroups).forEach(([tId, group]) => {
-      // Sort group by score descending, putting absent students at the bottom
-      const sortedGroup = [...group].sort((a: any, b: any) => {
-        if (a.isAbsent && !b.isAbsent) return 1;
-        if (!a.isAbsent && b.isAbsent) return -1;
-        return (b.score || 0) - (a.score || 0);
-      });
-
-      let currentRank = 1;
-      sortedGroup.forEach((r: any, idx: number) => {
-        if (r.isAbsent) {
-          rankMap[r.id] = idx + 1; // Fallback sequential rank
-          return;
-        }
-        if (idx === 0) {
-          currentRank = 1;
-        } else {
-          const prevRes = sortedGroup[idx - 1];
-          if (r.score !== prevRes.score) {
-            currentRank = idx + 1;
-          }
-        }
-        rankMap[r.id] = currentRank;
-      });
-    });
-
-    const ranked = sorted.map((r: any) => ({ ...r, rank: rankMap[r.id] || 1 }));
 
     if (filters.topOnly) {
-      return ranked.slice(0, 10);
+      return sorted.slice(0, 10);
     }
     
-    return ranked;
+    return sorted;
   }, [results, filters, selectedTestIds, resultsSortConfig, searchTerm]);
 
   const isMedicalFromTestsOnly = useMemo(() => {
@@ -2634,7 +2641,7 @@ export default function Results() {
             <table className="w-full text-left border-collapse min-w-[1200px]">
               <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-30 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
-                  <th className="px-6 py-5 w-12 sticky top-0 left-0 bg-slate-50/95 backdrop-blur-md z-35 border-b border-slate-100">
+                  <th className="px-4 py-2 w-12 sticky top-0 left-0 bg-slate-50/95 backdrop-blur-md z-35 border-b border-slate-100">
                     <input 
                       type="checkbox" 
                       className="rounded border-slate-300"
@@ -2649,7 +2656,7 @@ export default function Results() {
                     />
                   </th>
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-12 bg-slate-50/95 backdrop-blur-md z-35 min-w-[220px] max-w-[220px] border-b border-slate-100"
+                    className="px-4 py-2 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-12 bg-slate-50/95 backdrop-blur-md z-35 min-w-[220px] max-w-[220px] border-b border-slate-100"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'studentName' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'studentName', direction: dir });
@@ -2657,9 +2664,9 @@ export default function Results() {
                   >
                     Student {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5 sticky top-0 left-[268px] bg-slate-50/95 backdrop-blur-md z-35 min-w-[200px] max-w-[200px] border-b border-slate-100">Program & Center</th>
-                  <th className="px-6 py-5 sticky top-0 left-[468px] bg-slate-50/95 backdrop-blur-md z-35 w-20 border-b border-slate-100">Mode</th>
-                  <th className="px-6 py-5 text-center bg-blue-50/35 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-[548px] bg-blue-50/95 backdrop-blur-md z-35 w-24 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]"
+                  <th className="px-4 py-2 sticky top-0 left-[268px] bg-slate-50/95 backdrop-blur-md z-35 min-w-[200px] max-w-[200px] border-b border-slate-100">Program & Center</th>
+                  <th className="px-4 py-2 sticky top-0 left-[468px] bg-slate-50/95 backdrop-blur-md z-35 w-20 border-b border-slate-100">Mode</th>
+                  <th className="px-4 py-2 text-center bg-blue-50/35 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-[548px] bg-blue-50/95 backdrop-blur-md z-35 w-24 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'score' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'score', direction: dir });
@@ -2670,7 +2677,7 @@ export default function Results() {
                   {allAvailableSubjects.map(sub => (
                     <th 
                       key={sub}
-                      className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
+                      className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
                       onClick={() => {
                         const dir = resultsSortConfig?.key === `subject_${sub}` && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                         setResultsSortConfig({ key: `subject_${sub}`, direction: dir });
@@ -2680,7 +2687,7 @@ export default function Results() {
                     </th>
                   ))}
                   <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
+                    className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
                     onClick={() => {
                       const dir = resultsSortConfig?.key === 'accuracy' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setResultsSortConfig({ key: 'accuracy', direction: dir });
@@ -2688,11 +2695,11 @@ export default function Results() {
                   >
                     % Accuracy {resultsSortConfig?.key === 'accuracy' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Rank</th>
-                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Correct</th>
-                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Wrong</th>
-                  <th className="px-6 py-5 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Unattempt</th>
-                  <th className="px-6 py-5 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>
+                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Rank</th>
+                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Correct</th>
+                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Wrong</th>
+                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Unattempt</th>
+                  <th className="px-4 py-2 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -2703,7 +2710,7 @@ export default function Results() {
                   
                   return (
                     <tr key={res.id} className={cn("group hover:bg-slate-50/80 transition-colors", selectedResultIds.includes(res.id) && "bg-blue-50/50")}>
-                      <td className="px-6 py-5 sticky left-0 bg-white group-hover:bg-slate-50/90 transition-colors z-10 border-b border-slate-100">
+                      <td className="px-4 py-1.5 sticky left-0 bg-white group-hover:bg-slate-50/90 transition-colors z-10 border-b border-slate-100">
                         <input 
                           type="checkbox" 
                           className="rounded border-slate-300"
@@ -2719,7 +2726,7 @@ export default function Results() {
                       </td>
                       {/* Col A: Student Info */}
                       <td 
-                        className="px-6 py-5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors sticky left-12 bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[220px] max-w-[220px] border-b border-slate-100"
+                        className="px-4 py-1.5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors sticky left-12 bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[220px] max-w-[220px] border-b border-slate-100"
                         onClick={() => {
                           setSelectedResult(res); 
                           setDetailBackView('table');
@@ -2729,57 +2736,57 @@ export default function Results() {
                         title="Click to view detailed student analysis"
                       >
                         <div className="flex flex-col">
-                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1.5 group-hover/student-cell:underline">{res.regNo}</span>
-                          <span className="text-sm font-black text-slate-900 leading-snug group-hover/student-cell:text-blue-700 transition-colors">
+                          <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1 group-hover/student-cell:underline">{res.regNo}</span>
+                          <span className="text-sm font-black text-slate-900 leading-tight group-hover/student-cell:text-blue-700 transition-colors">
                             {exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`}
                           </span>
                         </div>
                       </td>
                       {/* Col B: Student Details */}
-                      <td className="px-6 py-5 sticky left-[268px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[200px] max-w-[200px] border-b border-slate-100">
-                        <div className="flex flex-col gap-1 justify-start items-start">
+                      <td className="px-4 py-1.5 sticky left-[268px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[200px] max-w-[200px] border-b border-slate-100">
+                        <div className="flex flex-col gap-0.5 justify-start items-start">
                           {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
-                          <div className="text-xs font-black text-slate-900 leading-normal">
+                          <div className="text-xs font-black text-slate-900 leading-tight">
                             {res.programName || '—'}
                           </div>
-                          <div className="text-[11px] font-bold text-slate-400 leading-none">
+                          <div className="text-[10px] font-bold text-slate-400 leading-none">
                             {res.centerName || '—'}
                           </div>
                           {res.type && (
-                            <span className="text-[8px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono select-none mt-1">
+                            <span className="text-[8px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono select-none mt-0.5">
                               {res.type}
                             </span>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-5 sticky left-[468px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 w-20 border-b border-slate-100">
-                        <Badge variant={res.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] uppercase">
+                      <td className="px-4 py-1.5 sticky left-[468px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 w-20 border-b border-slate-100">
+                        <Badge variant={res.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] uppercase py-0">
                           {res.testMode || 'offline'}
                         </Badge>
                       </td>
-                      <td className="px-6 py-5 text-center bg-blue-50/10 whitespace-nowrap sticky left-[548px] group-hover:bg-blue-50/20 transition-colors z-10 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] w-24">
+                      <td className="px-4 py-1.5 text-center bg-blue-50/10 whitespace-nowrap sticky left-[548px] group-hover:bg-blue-50/20 transition-colors z-10 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] w-24">
                         <div className="flex flex-col items-center justify-center">
-                          <span className="text-xl font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
+                          <span className="text-base font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
                           {!res.isAbsent && (
-                            <span className="text-[8px] font-extrabold text-rose-700 bg-rose-50 rounded border border-rose-100 px-1.5 py-0.5 mt-1 tracking-tight uppercase font-mono">
+                            <span className="text-[8px] font-extrabold text-rose-700 bg-rose-50 rounded border border-rose-100 px-1.5 py-0 mt-0.5 tracking-tight uppercase font-mono leading-none">
                               {determineRankBucket(res.score, res.testMaxScore, res.testPattern)}
                             </span>
                           )}
                         </div>
                       </td>
                       {allAvailableSubjects.map(sub => (
-                        <td key={sub} className="px-6 py-5 text-center">
-                          <span className="text-sm font-black text-indigo-600">{res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score || 0)}</span>
+                        <td key={sub} className="px-4 py-1.5 text-center">
+                          <span className="text-xs font-black text-indigo-600">{res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score || 0)}</span>
                         </td>
                       ))}
-                      <td className="px-6 py-5 text-center">
-                        <Badge variant={(res.accuracy || 0) > 70 ? 'green' : 'blue'} className="text-[9px]">
+                      <td className="px-4 py-1.5 text-center font-bold">
+                        <Badge variant={(res.accuracy || 0) > 70 ? 'green' : 'blue'} className="text-[9px] py-0">
                           {res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`}
                         </Badge>
                       </td>
-                      <td className="px-6 py-5 text-center">
+                      <td className="px-4 py-1.5 text-center">
                         <div className={cn(
-                          "w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs mx-auto",
+                          "w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs mx-auto",
                           res.isAbsent ? "text-slate-200" :
                           res.rank === 1 ? "bg-amber-100 text-amber-700" :
                           res.rank === 2 ? "bg-slate-100 text-slate-500" :
@@ -2789,10 +2796,10 @@ export default function Results() {
                           {res.isAbsent ? '—' : `#${res.rank}`}
                         </div>
                       </td>
-                      <td className="px-6 py-5 text-center text-sm font-black text-emerald-500">{res.isAbsent ? '—' : (res.correct || 0)}</td>
-                      <td className="px-6 py-5 text-center text-sm font-black text-rose-500">{res.isAbsent ? '—' : (res.wrong || 0)}</td>
-                      <td className="px-6 py-5 text-center text-sm font-black text-slate-300">{res.isAbsent ? '—' : (res.blank || 0)}</td>
-                      <td className="px-6 py-5 text-right flex items-center justify-end gap-2">
+                      <td className="px-4 py-1.5 text-center text-xs font-black text-emerald-500">{res.isAbsent ? '—' : (res.correct || 0)}</td>
+                      <td className="px-4 py-1.5 text-center text-xs font-black text-rose-500">{res.isAbsent ? '—' : (res.wrong || 0)}</td>
+                      <td className="px-4 py-1.5 text-center text-xs font-black text-slate-300">{res.isAbsent ? '—' : (res.blank || 0)}</td>
+                      <td className="px-4 py-1.5 text-right flex items-center justify-end gap-2">
                         <Button 
                           variant="ghost" 
                           size="sm" 
@@ -4787,6 +4794,42 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       return b.timestamp - a.timestamp;
     });
 
+    // Calculate standard comparison ranks GLOBALLY per testId (before any filtering or permissions are applied)
+    const testToResultsMap: Record<string, any[]> = {};
+    resolvedResults.forEach(res => {
+      if (!res.testId) return;
+      if (!testToResultsMap[res.testId]) testToResultsMap[res.testId] = [];
+      testToResultsMap[res.testId].push(res);
+    });
+
+    const globalComparisonTestRanks: Record<string, Record<string, number>> = {};
+    Object.entries(testToResultsMap).forEach(([tId, list]) => {
+      const sorted = [...list].sort((a, b) => {
+        if (a.isAbsent && !b.isAbsent) return 1;
+        if (!a.isAbsent && b.isAbsent) return -1;
+        return (b.score || 0) - (a.score || 0);
+      });
+      const ranks: Record<string, number> = {};
+      let currentRank = 1;
+      sorted.forEach((res, idx) => {
+        const studentKey = `${res.regNo || '—'}_${res.studentName}`;
+        if (res.isAbsent) {
+          ranks[studentKey] = idx + 1;
+          return;
+        }
+        if (idx === 0) {
+          currentRank = 1;
+        } else {
+          const prevRes = sorted[idx - 1];
+          if (res.score !== prevRes.score) {
+            currentRank = idx + 1;
+          }
+        }
+        ranks[studentKey] = currentRank;
+      });
+      globalComparisonTestRanks[tId] = ranks;
+    });
+
     // Group all results by student.
     const studentMap: Record<string, {
       studentName: string;
@@ -4820,7 +4863,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           testResults: {}
         };
       }
-      studentMap[key].testResults[res.testId] = res;
+      
+      const rankVal = globalComparisonTestRanks[res.testId]?.[key] || 1;
+      studentMap[key].testResults[res.testId] = {
+        ...res,
+        rank: rankVal
+      };
     });
 
     // Filter students at student profile level to prevent past scores from being dropped
@@ -4842,54 +4890,6 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         (s.regNo || '').toLowerCase().includes(search)
       );
     }
-
-    // Dynamic rank calculation per test across the filtered student list
-    const testToResults: Record<string, any[]> = {};
-    filteredStudents.forEach(student => {
-      Object.entries(student.testResults).forEach(([tId, res]) => {
-        if (!testToResults[tId]) testToResults[tId] = [];
-        testToResults[tId].push({ studentKey: `${student.regNo}_${student.studentName}`, ...res });
-      });
-    });
-
-    const testIdToStudentRanks: Record<string, Record<string, number>> = {};
-    Object.entries(testToResults).forEach(([tId, list]) => {
-      // Sort by score descending to rank. IsAbsent records are relegated to the bottom
-      const sorted = [...list].sort((a, b) => {
-        if (a.isAbsent && !b.isAbsent) return 1;
-        if (!a.isAbsent && b.isAbsent) return -1;
-        return (b.score || 0) - (a.score || 0);
-      });
-      const ranks: Record<string, number> = {};
-      let currentRank = 1;
-      sorted.forEach((res, idx) => {
-        if (res.isAbsent) {
-          ranks[res.studentKey] = idx + 1;
-          return;
-        }
-        if (idx === 0) {
-          currentRank = 1;
-        } else {
-          const prevRes = sorted[idx - 1];
-          if (res.score !== prevRes.score) {
-            currentRank = idx + 1;
-          }
-        }
-        ranks[res.studentKey] = currentRank;
-      });
-      testIdToStudentRanks[tId] = ranks;
-    });
-
-    // Update ranks in student testResults objects
-    filteredStudents.forEach(student => {
-      const studentKey = `${student.regNo}_${student.studentName}`;
-      Object.keys(student.testResults).forEach(tId => {
-        const calculatedRank = testIdToStudentRanks[tId]?.[studentKey];
-        if (calculatedRank) {
-          student.testResults[tId].rank = calculatedRank;
-        }
-      });
-    });
 
     // Sort students: Rank #1 of the current test (newest chronTests[0]) at the top!
     const currentTestId = chronTests[0]?.testId;
@@ -6173,7 +6173,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-20 border-b border-slate-100 shadow-sm shadow-slate-100/10">
                 <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
                   <th 
-                    className="px-6 py-5 cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-4 py-2 cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = studentSortConfig?.key === 'studentName' && studentSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setStudentSortConfig({ key: 'studentName', direction: dir });
@@ -6181,9 +6181,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   >
                     Student / Reg No{studentSortConfig?.key === 'studentName' && (studentSortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
                   </th>
-                  <th className="px-6 py-5 text-center">Center / Batch</th>
+                  <th className="px-4 py-2 text-center">Center / Batch</th>
                   <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = studentSortConfig?.key === 'testsTaken' && studentSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setStudentSortConfig({ key: 'testsTaken', direction: dir });
@@ -6192,7 +6192,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     Tests Taken{studentSortConfig?.key === 'testsTaken' && (studentSortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
                   </th>
                   <th 
-                    className="px-6 py-5 text-center cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = studentSortConfig?.key === 'avgScore' && studentSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setStudentSortConfig({ key: 'avgScore', direction: dir });
@@ -6201,7 +6201,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     Avg. Score{studentSortConfig?.key === 'avgScore' && (studentSortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
                   </th>
                   <th 
-                    className="px-6 py-5 text-right cursor-pointer hover:text-blue-600 transition-colors"
+                    className="px-4 py-2 text-right cursor-pointer hover:text-blue-600 transition-colors"
                     onClick={() => {
                       const dir = studentSortConfig?.key === 'accuracy' && studentSortConfig.direction === 'asc' ? 'desc' : 'asc';
                       setStudentSortConfig({ key: 'accuracy', direction: dir });
@@ -6223,7 +6223,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                         }}
                         className="hover:bg-slate-50/80 transition-all duration-200 group cursor-pointer"
                       >
-                        <td className="px-6 py-5">
+                        <td className="px-4 py-2">
                           <div className="flex flex-col">
                             <span className="text-sm font-black text-slate-905 group-hover:text-blue-600 transition-colors flex items-center gap-2">
                               {exportWithName ? s.studentName : `STUDENT_${s.regNo || 'ANON'}`}
@@ -6234,7 +6234,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                               <span className="text-[10px] font-bold text-slate-400 uppercase">Reg: {s.regNo}</span>
                               {s.type && (
-                                <span className="text-[9px] font-black text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono">
+                                <span className="text-[9px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-wide font-mono animate-none">
                                   {s.type}
                                 </span>
                               )}
@@ -6250,25 +6250,25 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-5 text-center">
+                        <td className="px-4 py-2 text-center">
                           <div className="flex flex-col items-center">
-                            <Badge variant="slate" className="bg-white border-slate-200 text-slate-500 font-black whitespace-nowrap text-[10px]">
+                            <Badge variant="slate" className="bg-white border-slate-200 text-slate-500 font-black whitespace-nowrap text-[10px] py-0 h-4.5">
                               {s.centerName || '—'}
                             </Badge>
-                            <span className="text-[9px] font-black text-slate-400 mt-1 uppercase tracking-tighter">
+                            <span className="text-[9px] font-black text-slate-400 mt-0.5 uppercase tracking-tighter">
                               {s.batchCode || s.batchName || '—'}
                             </span>
                           </div>
                         </td>
-                        <td className="px-6 py-5 text-center">
-                           <span className="px-2.5 py-1 bg-slate-100 rounded-lg text-[10px] font-black text-slate-600 uppercase">
+                        <td className="px-4 py-2 text-center">
+                           <span className="px-2 py-0.5 bg-slate-100 rounded-lg text-[10px] font-black text-slate-600 uppercase">
                              {s.testsTaken} Tests
                            </span>
                         </td>
-                        <td className="px-6 py-5 text-center font-black text-indigo-600 text-base">{s.avgScore}</td>
-                        <td className="px-6 py-5 text-right">
-                           <div className="flex flex-col items-end gap-1">
-                              <span className="text-sm font-black text-blue-600">{s.accuracy}%</span>
+                        <td className="px-4 py-2 text-center font-black text-indigo-600 text-sm">{s.avgScore}</td>
+                        <td className="px-4 py-2 text-right">
+                           <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-xs font-black text-blue-600 leading-none">{s.accuracy}%</span>
                               <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                  <motion.div 
                                    className="h-full bg-blue-600"
@@ -7469,7 +7469,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                         return (
                           <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300">
                              {/* Student Details sticky first column */}
-                            <td className="px-6 py-4.5 border-r-[3.5px] border-r-amber-700/70 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
+                            <td className="px-4 py-2 border-r-[3.5px] border-r-amber-700/70 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
                               <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">
                                 {exportWithName ? studentItem.studentName : `STUDENT_${studentItem.regNo || 'ANON'}`}
                               </div>
