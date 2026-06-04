@@ -29,6 +29,8 @@ import {
   Inbox
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
 import {
   ResponsiveContainer,
   BarChart,
@@ -2308,6 +2310,121 @@ export default function Results() {
     document.body.removeChild(link);
   };
 
+  const handleExportPDF = () => {
+    if (sortedResults.length === 0) {
+      toast.error('No results to export');
+      return;
+    }
+
+    const doc = new jsPDF('l', 'mm', 'a4');
+    const testName = selectedTestIds.length === 1 
+      ? tests.find(t => t.id === selectedTestIds[0])?.name || 'Results'
+      : `${selectedTestIds.length} Combined Test Series Results`;
+
+    // Premium styling header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text("STUDENT PERFORMANCE LEADERBOARD", 14, 18);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139); // slate-500
+    doc.text(`Test Series: ${testName}`, 14, 25);
+    doc.text(`Exported On: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} • Generated securely`, 14, 30);
+
+    const displaySubjects = allAvailableSubjects;
+    
+    // AutoTable row mapping
+    const tableRows = sortedResults.map(res => {
+      const scoreMaxLimit = selectedTestIds.length === 1 
+        ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 300) 
+        : (res.testMaxScore || 300);
+
+      const rollNo = res.regNo || '—';
+      const studentName = exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`;
+      const batchCode = res.batchCode || '—';
+      const centerName = res.centerName || '—';
+      const accuracy = res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`;
+      const metrics = res.isAbsent ? '—' : `C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}`;
+      const totalScore = res.isAbsent ? 'ABSENT' : `${res.score}/${scoreMaxLimit}`;
+
+      const row = [
+        res.isAbsent ? '—' : `#${res.rank}`,
+        rollNo,
+        studentName,
+        batchCode,
+        centerName
+      ];
+
+      // Dynamic subject scores
+      displaySubjects.forEach(sub => {
+        const subScore = res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score ?? 0);
+        row.push(subScore);
+      });
+
+      row.push(accuracy);
+      row.push(metrics);
+      row.push(totalScore);
+
+      return row;
+    });
+
+    const tableHeaders = [
+      'Rank',
+      'Roll No',
+      'Student Name',
+      'Batch',
+      'Center',
+      ...displaySubjects.map(sub => sub.toUpperCase()),
+      'Accuracy',
+      'C | W | U',
+      'Total Score'
+    ];
+
+    (doc as any).autoTable({
+      head: [tableHeaders],
+      body: tableRows,
+      startY: 36,
+      theme: 'striped',
+      headStyles: {
+        fillColor: [15, 23, 42], // Deep navy/slate-900
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        halign: 'center'
+      },
+      columnStyles: {
+        0: { halign: 'center', width: 14 }, // Rank
+        1: { halign: 'center', width: 22 }, // Roll No
+        2: { halign: 'left', fontStyle: 'bold' }, // Name
+        3: { halign: 'center', width: 24 }, // Batch
+        4: { halign: 'left', width: 26 }  // Center
+      },
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+        valign: 'middle'
+      },
+      didParseCell: (data: any) => {
+        // Center-align columns starting from dynamic subject scores up to total score
+        if (data.column.index >= 5) {
+          data.cell.styles.halign = 'center';
+        }
+        // Style the custom total score Column
+        if (data.column.index === tableHeaders.length - 1) {
+          data.cell.styles.fontStyle = 'bold';
+          if (data.cell.raw !== 'ABSENT') {
+            data.cell.styles.textColor = [37, 99, 235]; // Blue-600
+          }
+        }
+      }
+    });
+
+    const sanitizedFileName = testName.replace(/[^a-z0-9]/gi, '_');
+    doc.save(`${sanitizedFileName}_Leaderboard.pdf`);
+  };
+
 
 
 
@@ -2469,6 +2586,11 @@ export default function Results() {
             <Button variant="outline" size="md" onClick={handleExportCSV} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
               <Download size={18} className="mr-2 text-emerald-600" />
               Export CSV
+            </Button>
+
+            <Button variant="outline" size="md" onClick={handleExportPDF} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
+              <FileText size={18} className="mr-2 text-rose-600" />
+              Export PDF
             </Button>
 
             {canEdit && selectedResultIds.length > 0 && (

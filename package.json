@@ -21,6 +21,8 @@
     "express": "^4.21.2",
     "firebase": "^12.13.0",
     "framer-motion": "^12.38.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "latest",
     "motion": "latest",
     "papaparse": "^5.5.3",
