@@ -1577,6 +1577,38 @@ export default function Results() {
     batches: metaBatches
   }), [metaPrograms, metaCenters, metaBatches]);
 
+  const headersStats = useMemo(() => {
+    const stats: Record<string, { highest: number | string, avg: number | string }> = {};
+    allAvailableSubjects.forEach(subName => {
+      const validScores = results
+        .filter(r => !r.isAbsent)
+        .map(r => {
+          const score = getSubjectScore(r, subName as any);
+          return typeof score === 'number' ? score : null;
+        })
+        .filter((v): v is number => v !== null);
+
+      if (validScores.length === 0) {
+        stats[subName] = { highest: '—', avg: '—' };
+      } else {
+        const highestVal = Math.max(...validScores);
+        const avgVal = Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
+        stats[subName] = { highest: highestVal, avg: avgVal };
+      }
+    });
+
+    const validTotalScores = results.filter(r => !r.isAbsent).map(r => r.score || 0);
+    if (validTotalScores.length === 0) {
+      stats['CUMULATIVE'] = { highest: '—', avg: '—' };
+    } else {
+      const highestVal = Math.max(...validTotalScores);
+      const avgVal = Math.round(validTotalScores.reduce((a, b) => a + b, 0) / validTotalScores.length);
+      stats['CUMULATIVE'] = { highest: highestVal, avg: avgVal };
+    }
+
+    return stats;
+  }, [allAvailableSubjects, results]);
+
   useEffect(() => {
     fetchTests();
     
@@ -1799,69 +1831,110 @@ export default function Results() {
     setIsSyncingGlobal(true);
     const toastId = toast.loading('Syncing student metadata...');
     try {
-      const [resultsSnap, studentsSnap] = await Promise.all([
-        getDocs(collection(db, 'result_updated')),
-        getDocs(collection(db, 'students'))
-      ]);
+      const targetTestIds = selectedTestIds.length > 0 
+        ? selectedTestIds 
+        : tests.map(t => t.id);
 
-      const studentMap = studentsSnap.docs.reduce((acc: any, d) => {
-        const data = d.data();
-        if (data.regNo) acc[String(data.regNo).toUpperCase()] = data;
-        return acc;
-      }, {});
-      
-      const batchMap = metaBatches.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
-      const centerMap = metaCenters.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
-      const progMap = metaPrograms.reduce((acc: any, d) => ({ ...acc, [d.id]: d }), {});
+      if (targetTestIds.length === 0) {
+        toast.info('No tests found to sync.', { id: toastId });
+        setIsSyncingGlobal(false);
+        return;
+      }
 
       let updateCount = 0;
       let currentBatch = writeBatch(db);
       let opCount = 0;
+      const localStudentCache: Record<string, any> = {};
 
-      for (const resDoc of resultsSnap.docs) {
-        const resData = resDoc.data();
-        const regNo = String(resData.regNo || '').trim().toUpperCase();
-        if (!regNo) continue;
+      for (const testId of targetTestIds) {
+        const resultsQuery = query(collection(db, 'result_updated'), where('testId', '==', testId));
+        const resultsSnap = await getDocs(resultsQuery);
+        
+        if (resultsSnap.empty) continue;
 
-        const student = studentMap[regNo];
-        if (student) {
-          const updates: any = {};
-          if (!resData.studentName || resData.studentName === 'Unknown Student') updates.studentName = student.name;
-          if (!resData.centerId && student.centerId) updates.centerId = student.centerId;
-          const centerId = updates.centerId || resData.centerId;
-          const centerDetail = findCenterSafely(centerId, metaCenters);
-          if (centerId && centerDetail) {
-            updates.centerId = centerDetail.id;
-            if (!resData.centerName) updates.centerName = centerDetail.centerName;
+        const regNos = Array.from(new Set(
+          resultsSnap.docs.map(doc => String(doc.data().regNo || '').trim().toUpperCase()).filter(Boolean)
+        ));
+
+        if (regNos.length === 0) continue;
+
+        // Fetch students in chunks of 30 for missing regNos
+        const missingRegNos = regNos.filter(regNo => !localStudentCache[regNo]);
+        if (missingRegNos.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < missingRegNos.length; i += 30) {
+            chunks.push(missingRegNos.slice(i, i + 30));
           }
-          
-          if (!resData.batchId && student.batchId) updates.batchId = student.batchId;
-          const batchId = updates.batchId || resData.batchId;
-          const batchDetail = findBatchSafely(batchId, metaBatches);
-          if (batchId && batchDetail) {
-            updates.batchId = batchDetail.id;
-            if (!resData.batchName) updates.batchName = batchDetail.batchName;
-          }
-          
-          if (!resData.programId && student.programId) updates.programId = student.programId;
-          const progId = updates.programId || resData.programId;
-          const programDetail = findProgramSafely(progId, metaPrograms);
-          if (progId && programDetail) {
-            updates.programId = programDetail.id;
-            if (!resData.programName) updates.programName = programDetail.programName;
-          }
-          
-          if (student.batchCode && !resData.batchCode) updates.batchCode = student.batchCode;
 
-          if (Object.keys(updates).length > 0) {
-            currentBatch.update(resDoc.ref, { ...updates, metadataSyncedAt: serverTimestamp() });
-            updateCount++;
-            opCount++;
+          for (const chunk of chunks) {
+            try {
+              const studentsQuery = query(collection(db, 'students'), where('regNo', 'in', chunk));
+              const studentsSnap = await getDocs(studentsQuery);
+              studentsSnap.docs.forEach(docSnap => {
+                const data = docSnap.data();
+                if (data.regNo) {
+                  localStudentCache[String(data.regNo).trim().toUpperCase()] = data;
+                }
+              });
+            } catch (err) {
+              console.warn("Failed syncing chunk of students:", err);
+            }
+          }
+        }
 
-            if (opCount >= 450) {
-              await currentBatch.commit();
-              currentBatch = writeBatch(db);
-              opCount = 0;
+        for (const resDoc of resultsSnap.docs) {
+          const resData = resDoc.data();
+          const regNo = String(resData.regNo || '').trim().toUpperCase();
+          if (!regNo) continue;
+
+          const student = localStudentCache[regNo];
+          if (student) {
+            const updates: any = {};
+            if (!resData.studentName || resData.studentName === 'Unknown Student' || resData.studentName !== student.name) {
+              updates.studentName = student.name;
+            }
+            if (student.centerId && (!resData.centerId || resData.centerId !== student.centerId)) {
+              updates.centerId = student.centerId;
+              const centerDetail = findCenterSafely(student.centerId, metaCenters);
+              if (centerDetail) {
+                updates.centerName = centerDetail.centerName;
+              }
+            }
+            if (student.batchId && (!resData.batchId || resData.batchId !== student.batchId)) {
+              updates.batchId = student.batchId;
+              const batchDetail = findBatchSafely(student.batchId, metaBatches);
+              if (batchDetail) {
+                updates.batchName = batchDetail.batchName;
+                updates.batchCode = student.batchCode || batchDetail.batchCode || '';
+              }
+            }
+            if (student.programId && (!resData.programId || resData.programId !== student.programId)) {
+              updates.programId = student.programId;
+              const programDetail = findProgramSafely(student.programId, metaPrograms);
+              if (programDetail) {
+                updates.programName = programDetail.programName;
+              }
+            }
+            if (student.batchCode && (!resData.batchCode || resData.batchCode !== student.batchCode)) {
+              updates.batchCode = student.batchCode;
+            }
+
+            Object.keys(updates).forEach(key => {
+              if (updates[key] === undefined) {
+                delete updates[key];
+              }
+            });
+
+            if (Object.keys(updates).length > 0) {
+              currentBatch.update(resDoc.ref, { ...updates, metadataSyncedAt: serverTimestamp() });
+              updateCount++;
+              opCount++;
+
+              if (opCount >= 450) {
+                await currentBatch.commit();
+                currentBatch = writeBatch(db);
+                opCount = 0;
+              }
             }
           }
         }
@@ -1879,7 +1952,7 @@ export default function Results() {
       }
     } catch (err) {
       console.error(err);
-      toast.error('Sync failed', { id: toastId });
+      toast.error(`Sync failed: ${err instanceof Error ? err.message : String(err)}`, { id: toastId });
     } finally {
       setIsSyncingGlobal(false);
     }
@@ -1893,12 +1966,11 @@ export default function Results() {
     setLoading(true);
     const toastId = toast.loading('Searching for orphaned results...');
     try {
-      // 1. Fetch all test IDs
-      const testsSnap = await getDocs(collection(db, 'tests'));
-      const testIds = new Set(testsSnap.docs.map(doc => doc.id));
+      // 1. Resolve all active test IDs from local state (saves an expensive table scan of tests!)
+      const testIds = new Set(tests.map(t => t.id));
 
-      // 2. Fetch all results
-      const resultsSnap = await getDocs(collection(db, 'result_updated'));
+      // 2. Fetch results with a safety limit of 1500 to avoid exceeding the Firestore memory/query allocation limits
+      const resultsSnap = await getDocs(query(collection(db, 'result_updated'), limit(1500)));
       const orphanedDocs = resultsSnap.docs.filter(docSnap => {
         const data = docSnap.data();
         return !data.testId || !testIds.has(data.testId);
@@ -2039,10 +2111,17 @@ export default function Results() {
     setLoading(true);
     try {
       const allResults: any[] = [];
-      const queries = testIds.map(id => query(collection(db, 'result_updated'), where('testId', '==', id), orderBy('score', 'desc')));
+      const queries = testIds.map(id => query(collection(db, 'result_updated'), where('testId', '==', id)));
       const snaps = await Promise.all(queries.map(q => getDocs(q)));
       snaps.forEach(snap => {
         allResults.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+
+      // In-memory sort by score descending to prevent database in-memory sort limits or composite index requisites
+      allResults.sort((a, b) => {
+        if (a.isAbsent && !b.isAbsent) return 1;
+        if (!a.isAbsent && b.isAbsent) return -1;
+        return (b.score || 0) - (a.score || 0);
       });
 
       // Dynamically fetch and merge up-to-date student details to solve any stale/missing mapping issues!
@@ -2505,104 +2584,7 @@ export default function Results() {
         />
       ) : (
         <>
-          {selectedTestIds.length > 0 ? (() => {
-            const validResultsSummary = results.filter(r => !r.isAbsent);
-            const isMedical = isMedicalFromTestsOnly;
-            
-            const validTotalScores = validResultsSummary.map(r => r.score || 0);
-            const totalHighest = validTotalScores.length > 0 ? Math.max(...validTotalScores) : 0;
-            const totalAvg = validTotalScores.length > 0 ? Math.round(validTotalScores.reduce((a, b) => a + b, 0) / validTotalScores.length) : 0;
-            
-            const totalMax = selectedTestIds.length === 1 ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 720) : null;
-
-            const displaySubjects = isMedical 
-              ? ['Physics', 'Chemistry', 'Botany', 'Zoology'] 
-              : ['Physics', 'Chemistry', 'Math'];
-
-            const subjectStats = displaySubjects.map(subName => {
-              const validScores = results
-                .filter(r => !r.isAbsent)
-                .map(r => {
-                  const score = getSubjectScore(r, subName as any);
-                  return typeof score === 'number' ? score : null;
-                })
-                .filter((v): v is number => v !== null);
-
-              if (validScores.length === 0) {
-                return { name: subName, highest: '—', avg: '—' };
-              }
-              const highestVal = Math.max(...validScores);
-              const avgVal = Math.round(validScores.reduce((a, b) => a + b, 0) / validScores.length);
-              return { name: subName, highest: highestVal, avg: avgVal };
-            });
-
-            return (
-              <Card className="bg-gradient-to-br from-blue-700 via-indigo-700 to-violet-800 text-white p-5 relative overflow-hidden shadow-xl shadow-blue-100 rounded-2xl">
-                <div className="absolute right-[-5%] bottom-[0%] opacity-10 pointer-events-none">
-                  <BarChart3 size={150} strokeWidth={1} />
-                </div>
-
-                <div className="relative z-10 space-y-3.5">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-white/10 pb-3">
-                    <div>
-                      <span className="text-[9px] font-black uppercase tracking-[0.2em] bg-white/15 px-2.5 py-0.5 rounded-full text-blue-100 border border-white/5 shadow-inner">
-                        BATCH PERFORMANCE SUMMARY
-                      </span>
-                      <h3 className="text-lg font-black tracking-tight mt-1 text-white">
-                        {selectedTestIds.length === 1 
-                          ? tests.find(t => t.id === selectedTestIds[0])?.name 
-                          : `${selectedTestIds.length} Combined Test Series`}
-                      </h3>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    {/* Single Liner for Max Score */}
-                    <div className="flex flex-wrap items-center gap-x-8 gap-y-2 bg-white/5 backdrop-blur-sm rounded-xl px-4 py-2.5 border border-white/10">
-                      <div className="flex items-center gap-2 min-w-[160px]">
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        <span className="text-[11px] font-black uppercase tracking-wider text-emerald-300">MAX (HIGHEST):</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 flex-1">
-                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                          <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">TOTAL</span>
-                          <span className="text-sm font-black text-white">{totalHighest}</span>
-                          {totalMax && <span className="text-[10px] font-bold text-blue-300">/{totalMax}</span>}
-                        </div>
-                        {subjectStats.map(s => (
-                          <div key={`max-${s.name}`} className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                            <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">{s.name}</span>
-                            <span className="text-sm font-black text-white">{s.highest}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Single Liner for Average Score */}
-                    <div className="flex flex-wrap items-center gap-x-8 gap-y-2 bg-white/5 backdrop-blur-sm rounded-xl px-4 py-2.5 border border-white/10">
-                      <div className="flex items-center gap-2 min-w-[160px]">
-                        <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                        <span className="text-[11px] font-black uppercase tracking-wider text-amber-300">AVERAGE SCORES:</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 flex-1">
-                        <div className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                          <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">TOTAL</span>
-                          <span className="text-sm font-black text-white">{totalAvg}</span>
-                          {totalMax && <span className="text-[10px] font-bold text-blue-300">/{totalMax}</span>}
-                        </div>
-                        {subjectStats.map(s => (
-                          <div key={`avg-${s.name}`} className="flex items-center gap-2 bg-white/5 px-3 py-1 rounded-lg border border-white/5">
-                            <span className="text-[10px] text-blue-200 font-extrabold uppercase tracking-wide">{s.name}</span>
-                            <span className="text-sm font-black text-white">{s.avg}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            );
-          })() : null}
+          {/* Top batch performance card removed — integrated into student scorecard table headers */}
 
       {selectedTestIds.length > 0 ? (
         <>
@@ -2636,213 +2618,307 @@ export default function Results() {
               </Button>
             </div>
           )}
-          <Card className="bg-white border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm">
-          <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
-            <table className="w-full text-left border-collapse min-w-[1200px]">
-              <thead className="sticky top-0 bg-slate-50/95 backdrop-blur-md text-slate-500 z-30 border-b border-slate-100 shadow-sm shadow-slate-100/10">
-                <tr className="border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-[0.1em]">
-                  <th className="px-4 py-2 w-12 sticky top-0 left-0 bg-slate-50/95 backdrop-blur-md z-35 border-b border-slate-100">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-slate-300"
-                      checked={sortedResults.length > 0 && selectedResultIds.length === sortedResults.length}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedResultIds(sortedResults.map(r => r.id));
-                        } else {
-                          setSelectedResultIds([]);
-                        }
-                      }}
-                    />
-                  </th>
-                  <th 
-                    className="px-4 py-2 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-12 bg-slate-50/95 backdrop-blur-md z-35 min-w-[220px] max-w-[220px] border-b border-slate-100"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'studentName' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'studentName', direction: dir });
-                    }}
-                  >
-                    Student {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th className="px-4 py-2 sticky top-0 left-[268px] bg-slate-50/95 backdrop-blur-md z-35 min-w-[200px] max-w-[200px] border-b border-slate-100">Program & Center</th>
-                  <th className="px-4 py-2 sticky top-0 left-[468px] bg-slate-50/95 backdrop-blur-md z-35 w-20 border-b border-slate-100">Mode</th>
-                  <th className="px-4 py-2 text-center bg-blue-50/35 cursor-pointer hover:text-blue-600 transition-colors sticky top-0 left-[548px] bg-blue-50/95 backdrop-blur-md z-35 w-24 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'score' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'score', direction: dir });
-                    }}
-                  >
-                    Total Score {resultsSortConfig?.key === 'score' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  {allAvailableSubjects.map(sub => (
-                    <th 
-                      key={sub}
-                      className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
-                      onClick={() => {
-                        const dir = resultsSortConfig?.key === `subject_${sub}` && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                        setResultsSortConfig({ key: `subject_${sub}`, direction: dir });
-                      }}
-                    >
-                      {sub} {resultsSortConfig?.key === `subject_${sub}` && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                    </th>
-                  ))}
-                  <th 
-                    className="px-4 py-2 text-center cursor-pointer hover:text-blue-600 transition-colors sticky top-0 bg-slate-50/95 backdrop-blur-md z-20"
-                    onClick={() => {
-                      const dir = resultsSortConfig?.key === 'accuracy' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
-                      setResultsSortConfig({ key: 'accuracy', direction: dir });
-                    }}
-                  >
-                    % Accuracy {resultsSortConfig?.key === 'accuracy' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Rank</th>
-                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Correct</th>
-                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Wrong</th>
-                  <th className="px-4 py-2 text-center sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Unattempt</th>
-                  <th className="px-4 py-2 text-right sticky top-0 bg-slate-50/95 backdrop-blur-md z-20">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sortedResults.map((res) => {
-                  const pScore = res.subjectStats?.Physics?.score || 0;
-                  const cScore = res.subjectStats?.Chemistry?.score || 0;
-                  const mScore = res.subjectStats?.Math?.score || res.subjectStats?.Maths?.score || res.subjectStats?.Mathematics?.score || 0;
-                  
-                  return (
-                    <tr key={res.id} className={cn("group hover:bg-slate-50/80 transition-colors", selectedResultIds.includes(res.id) && "bg-blue-50/50")}>
-                      <td className="px-4 py-1.5 sticky left-0 bg-white group-hover:bg-slate-50/90 transition-colors z-10 border-b border-slate-100">
+          {/* Polished Student Scorecard Leaderboard Card with Dark Header */}
+          <Card className="bg-white border border-slate-100 rounded-[2.5rem] overflow-hidden shadow-sm animate-fade-in animate-duration-300">
+            <div className="overflow-auto max-h-[75vh] hover-scrollbar no-scrollbar relative">
+              <table className="w-full text-left border-collapse min-w-[1250px]">
+                <thead className="sticky top-0 bg-slate-900 text-slate-300 z-30 border-b border-slate-800 shadow-md">
+                  <tr className="text-[11px] font-black uppercase tracking-wider">
+                    {/* 1st Header: Student Profile & Checkbox */}
+                    <th className="px-6 py-5 text-left sticky left-0 z-35 bg-slate-900 text-white min-w-[320px] max-w-[320px] border-b border-slate-800 border-r border-slate-700">
+                      <div className="flex items-center gap-3">
                         <input 
                           type="checkbox" 
-                          className="rounded border-slate-300"
-                          checked={selectedResultIds.includes(res.id)}
-                          onChange={() => {
-                            setSelectedResultIds(prev => 
-                              prev.includes(res.id) 
-                                ? prev.filter(id => id !== res.id) 
-                                : [...prev, res.id]
-                            );
+                          className="rounded border-slate-700 bg-slate-800 checked:bg-blue-600 focus:ring-blue-500 text-blue-600 h-4 w-4 cursor-pointer"
+                          checked={sortedResults.length > 0 && selectedResultIds.length === sortedResults.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedResultIds(sortedResults.map(r => r.id));
+                            } else {
+                              setSelectedResultIds([]);
+                            }
                           }}
                         />
-                      </td>
-                      {/* Col A: Student Info */}
-                      <td 
-                        className="px-4 py-1.5 cursor-pointer hover:bg-blue-50/40 group/student-cell transition-colors sticky left-12 bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[220px] max-w-[220px] border-b border-slate-100"
-                        onClick={() => {
-                          setSelectedResult(res); 
-                          setDetailBackView('table');
-                          setAutoPrintDetail(false);
-                          setView('detail'); 
-                        }}
-                        title="Click to view detailed student analysis"
-                      >
-                        <div className="flex flex-col">
-                          {exportWithName && (
-                            <span className="text-[11px] font-extrabold text-blue-600 font-mono uppercase tracking-tight leading-none mb-1 group-hover/student-cell:underline">{res.regNo}</span>
-                          )}
-                          <span className="text-sm font-black text-slate-900 leading-tight group-hover/student-cell:text-blue-700 transition-colors">
-                            {exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`}
+                        <div className="flex flex-col cursor-pointer hover:text-blue-400 transition-colors"
+                          onClick={() => {
+                            const dir = resultsSortConfig?.key === 'studentName' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
+                            setResultsSortConfig({ key: 'studentName', direction: dir });
+                          }}
+                        >
+                          <span className="text-[12px] text-blue-400 font-extrabold uppercase tracking-widest font-sans">
+                            STUDENT PROFILE {resultsSortConfig?.key === 'studentName' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-bold font-mono mt-0.5 leading-none">
+                            ROLL-NO / PROGRAM BATCH
                           </span>
                         </div>
-                      </td>
-                      {/* Col B: Student Details */}
-                      <td className="px-4 py-1.5 sticky left-[268px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 min-w-[200px] max-w-[200px] border-b border-slate-100">
-                        <div className="flex flex-col gap-0.5 justify-start items-start">
-                          {res.isAbsent && <Badge variant="slate" className="text-[8px] bg-slate-100 text-slate-400">ABSENT</Badge>}
-                          <div className="text-xs font-black text-slate-900 leading-tight">
-                            {res.programName || '—'}
-                          </div>
-                          {exportWithName && res.centerName && (
-                            <div className="text-[10px] font-bold text-slate-400 leading-none">
-                              {res.centerName}
+                      </div>
+                    </th>
+
+                    {/* Subject Column Headers with Max & Avg score inside card element */}
+                    {allAvailableSubjects.map(sub => {
+                      const theme = (() => {
+                        const norm = sub.toLowerCase();
+                        if (norm.includes('phy')) return { border: 'border-amber-500/30', bg: 'bg-amber-500/5 hover:bg-amber-500/10', text: 'text-amber-500', name: 'PHYSICS' };
+                        if (norm.includes('chem')) return { border: 'border-emerald-500/30', bg: 'bg-emerald-500/5 hover:bg-emerald-500/10', text: 'text-emerald-500', name: 'CHEMISTRY' };
+                        if (norm.includes('math') || norm.includes('mat')) return { border: 'border-sky-500/30', bg: 'bg-sky-500/5 hover:bg-sky-500/10', text: 'text-sky-500', name: 'MATHEMATICS' };
+                        if (norm.includes('bot')) return { border: 'border-purple-500/30', bg: 'bg-purple-500/5 hover:bg-purple-500/10', text: 'text-purple-400', name: 'BOTANY' };
+                        if (norm.includes('zoo')) return { border: 'border-pink-500/30', bg: 'bg-pink-500/5 hover:bg-pink-500/10', text: 'text-pink-400', name: 'ZOOLOGY' };
+                        if (norm.includes('bio')) return { border: 'border-indigo-500/30', bg: 'bg-indigo-500/5 hover:bg-indigo-500/10', text: 'text-indigo-400', name: 'BIOLOGY' };
+                        return { border: 'border-slate-500/30', bg: 'bg-slate-500/5', text: 'text-slate-400', name: sub.toUpperCase() };
+                      })();
+                      const stat = headersStats[sub] || { highest: '—', avg: '—' };
+                      
+                      return (
+                        <th 
+                          key={sub}
+                          className="px-4 py-4 text-center cursor-pointer hover:bg-slate-800/80 transition-colors border-b border-slate-800"
+                          onClick={() => {
+                            const dir = resultsSortConfig?.key === `subject_${sub}` && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
+                            setResultsSortConfig({ key: `subject_${sub}`, direction: dir });
+                          }}
+                        >
+                          <div className={cn("mx-auto rounded-xl border px-3 py-2 flex flex-col items-center max-w-[150px] transition-all", theme.border, theme.bg)}>
+                            <span className={cn("text-[11px] font-black tracking-widest font-sans uppercase", theme.text)}>
+                              {theme.name} {resultsSortConfig?.key === `subject_${sub}` && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
+                            </span>
+                            <div className="flex gap-2 text-[9px] font-extrabold text-slate-400 mt-1 uppercase font-mono font-sans">
+                              <span>MAX: <span className="text-white font-black">{stat.highest}</span></span>
+                              <span>AVG: <span className="text-white font-black">{stat.avg}</span></span>
                             </div>
-                          )}
-                          {exportWithName && res.type && (
-                            <span className="text-[8px] font-black text-violet-750 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-100 uppercase tracking-widest font-mono select-none mt-0.5">
-                              {res.type}
+                          </div>
+                        </th>
+                      );
+                    })}
+
+                    {/* Cumulative Column Header */}
+                    <th 
+                      className="px-4 py-4 text-center cursor-pointer hover:bg-slate-800/80 transition-colors border-b border-slate-800"
+                      onClick={() => {
+                        const dir = resultsSortConfig?.key === 'score' && resultsSortConfig.direction === 'asc' ? 'desc' : 'asc';
+                        setResultsSortConfig({ key: 'score', direction: dir });
+                      }}
+                    >
+                      {(() => {
+                        const stat = headersStats['CUMULATIVE'] || { highest: '—', avg: '—' };
+                        return (
+                          <div className="mx-auto rounded-xl border border-orange-500/30 px-3 py-2 bg-orange-500/5 hover:bg-orange-500/10 transition-all flex flex-col items-center max-w-[150px]">
+                            <span className="text-[11px] font-black tracking-widest text-orange-400 font-sans uppercase">
+                              CUMULATIVE {resultsSortConfig?.key === 'score' && (resultsSortConfig.direction === 'asc' ? '↑' : '↓')}
                             </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-1.5 sticky left-[468px] bg-white group-hover:bg-slate-50/90 transition-colors z-10 w-20 border-b border-slate-100">
-                        <Badge variant={res.testMode === 'online' ? 'blue' : 'slate'} className="text-[9px] uppercase py-0">
-                          {res.testMode || 'offline'}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-1.5 text-center bg-blue-50/10 whitespace-nowrap sticky left-[548px] group-hover:bg-blue-50/20 transition-colors z-10 border-r-2 border-slate-200 border-b border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] w-24">
-                        <div className="flex flex-col items-center justify-center">
-                          <span className="text-base font-black text-blue-600 tracking-tighter">{res.isAbsent ? '—' : res.score}</span>
-                          {!res.isAbsent && (
-                            <span className="text-[8px] font-extrabold text-rose-700 bg-rose-50 rounded border border-rose-100 px-1.5 py-0 mt-0.5 tracking-tight uppercase font-mono leading-none">
-                              {determineRankBucket(res.score, res.testMaxScore, res.testPattern)}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      {allAvailableSubjects.map(sub => (
-                        <td key={sub} className="px-4 py-1.5 text-center">
-                          <span className="text-xs font-black text-indigo-600">{res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score || 0)}</span>
+                            <div className="flex gap-2 text-[9px] font-extrabold text-slate-400 mt-1 uppercase font-mono font-sans">
+                              <span>MAX: <span className="text-white font-black">{stat.highest}</span></span>
+                              <span>AVG: <span className="text-white font-black">{stat.avg}</span></span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </th>
+
+                    {/* Rank Column Header */}
+                    <th className="px-4 py-4 text-center border-b border-slate-800 w-32 font-sans">
+                      <div className="mx-auto rounded-xl border border-yellow-500/20 px-3 py-2 bg-yellow-500/5 flex flex-col items-center max-w-[120px]">
+                        <span className="text-[11.5px] font-black tracking-widest text-yellow-500 font-sans uppercase font-sans">RANK</span>
+                        <span className="text-[9px] font-bold text-slate-400 mt-0.5 uppercase tracking-wide leading-none font-sans">
+                          Test Rank
+                        </span>
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {sortedResults.map((res) => {
+                    const scoreMaxLimit = selectedTestIds.length === 1 
+                      ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 300) 
+                      : (res.testMaxScore || 300);
+
+                    return (
+                      <tr key={res.id} className={cn("group hover:bg-slate-50/75 transition-all text-sm", selectedResultIds.includes(res.id) && "bg-blue-50/30")}>
+                        
+                        {/* Student Profile Cell: Sticky Left */}
+                        <td className="px-6 py-5 sticky left-0 bg-white group-hover:bg-slate-50/90 transition-colors z-10 border-b border-slate-100 border-r-4 border-amber-600/90">
+                          <div className="flex items-start gap-4">
+                            <input 
+                              type="checkbox" 
+                              className="rounded border-slate-300 mt-1 focus:ring-blue-500 text-blue-600 h-4 w-4 cursor-pointer"
+                              checked={selectedResultIds.includes(res.id)}
+                              onChange={() => {
+                                setSelectedResultIds(prev => 
+                                  prev.includes(res.id) 
+                                    ? prev.filter(id => id !== res.id) 
+                                    : [...prev, res.id]
+                                );
+                              }}
+                            />
+                            
+                            <div className="flex flex-col gap-1 text-left min-w-0">
+                              {/* Student Name */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedResult(res); 
+                                  setDetailBackView('table');
+                                  setAutoPrintDetail(false);
+                                  setView('detail'); 
+                                }}
+                                className="text-left font-black text-slate-1000 group-hover:text-blue-700 text-[15px] leading-tight focus:outline-none transition-all hover:underline"
+                              >
+                                {exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`}
+                              </button>
+
+                              {/* Badges: Registration ID and Program Batch Code */}
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px] mt-0.5 font-sans">
+                                {res.regNo && (
+                                  <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-mono font-black border border-slate-200">
+                                    #{res.regNo}
+                                  </span>
+                                )}
+                                {res.batchCode && (
+                                  <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded font-bold border border-blue-100 font-sans">
+                                    {res.batchCode}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Center Location */}
+                              {res.centerName && (
+                                <span className="text-[10.5px] text-slate-400 font-extrabold uppercase tracking-wider font-sans mt-0.5">
+                                  {res.centerName}
+                                </span>
+                              )}
+
+                              {/* Sub details with enrollment and gold target badges */}
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                                {res.type && (
+                                  <span className="text-[8.5px] font-black text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 uppercase tracking-wide">
+                                    {res.type}
+                                  </span>
+                                )}
+                                
+                                {(res.rankTarget || res.targetYear) && (
+                                  <span className="text-[8.5px] font-black text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
+                                    <span className="text-amber-500">🎯</span>
+                                    <span>UNDER {res.rankTarget || '500'}</span>
+                                    {res.targetYear && <span className="text-slate-400 font-bold">({res.targetYear})</span>}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </td>
-                      ))}
-                      <td className="px-4 py-1.5 text-center font-bold">
-                        <Badge variant={(res.accuracy || 0) > 70 ? 'green' : 'blue'} className="text-[9px] py-0">
-                          {res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-1.5 text-center">
-                        <div className={cn(
-                          "w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs mx-auto",
+
+                        {/* Dynamic Subject Cells */}
+                        {allAvailableSubjects.map(sub => {
+                          const subObj = getRawSubjectObj(res, sub as any);
+                          const correct = subObj?.correct ?? 0;
+                          const wrong = subObj?.wrong ?? subObj?.incorrect ?? 0;
+                          const blank = subObj?.blank ?? subObj?.unattempted ?? 0;
+                          const subScore = res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score ?? 0);
+
+                          return (
+                            <td key={sub} className="px-4 py-5 text-center border-b border-slate-100 font-sans">
+                              <div className="flex flex-col items-center justify-center font-sans">
+                                <span className="text-xl font-black text-slate-900 tracking-tight font-sans">
+                                  {subScore}
+                                </span>
+                                {!res.isAbsent && (
+                                  <span className="text-[10px] font-black mt-1 font-mono tracking-tight text-slate-400 whitespace-nowrap">
+                                    <span className="text-emerald-600">C:{correct}</span>
+                                    <span className="mx-1 text-slate-200">|</span>
+                                    <span className="text-rose-500">W:{wrong}</span>
+                                    <span className="mx-1 text-slate-200">|</span>
+                                    <span className="text-slate-400">U:{blank}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        })}
+
+                        {/* Cumulative Cell */}
+                        <td className="px-4 py-5 text-center border-b border-slate-100 bg-slate-50/20 font-sans">
+                          <div className="flex flex-col items-center justify-center font-sans">
+                            <span className="text-xl font-black text-slate-900 tracking-tighter font-sans">
+                              {res.isAbsent ? '—' : `${res.score}/${scoreMaxLimit}`}
+                            </span>
+                            {!res.isAbsent && (
+                              <>
+                                <span className="text-[10px] font-black text-emerald-600 font-sans mt-0.5 uppercase tracking-wide">
+                                  {Math.round(res.accuracy || 0)}% Acc
+                                </span>
+                                <span className="text-[10px] font-black font-mono tracking-tight text-slate-400 mt-0.5 whitespace-nowrap">
+                                  <span className="text-emerald-600 font-sans">C:{res.correct || 0}</span>
+                                  <span className="mx-1 text-slate-200">|</span>
+                                  <span className="text-rose-500 font-sans font-mono">W:{res.wrong || res.incorrect || 0}</span>
+                                  <span className="mx-1 text-slate-200">|</span>
+                                  <span className="text-slate-400 font-sans font-mono">U:{res.blank || res.unattempted || 0}</span>
+                                </span>
+                                
+                                {/* Actions Container: PDF Badge + Admin Action */}
+                                <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+                                  <span className="text-[8.5px] font-black text-rose-700 bg-rose-50 border border-rose-100 rounded px-2 py-0.5 tracking-tight uppercase font-mono leading-none">
+                                    {determineRankBucket(res.score, scoreMaxLimit, res.testPattern)}
+                                  </span>
+                                  
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedResult(res);
+                                      setDetailBackView('table');
+                                      setAutoPrintDetail(true);
+                                      setView('detail');
+                                    }}
+                                    title="Print PDF Scorecard"
+                                    className="py-0.5 px-2 text-red-600 hover:text-red-700 bg-white hover:bg-red-50 border border-red-200 hover:border-red-300 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm text-[8.5px] font-black uppercase tracking-tight h-[18px] leading-none"
+                                  >
+                                    <FileText size={10} strokeWidth={3} className="text-red-500" />
+                                    <span>PDF</span>
+                                  </button>
+
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={async (e) => {
+                                        e.stopPropagation();
+                                        if (confirm('Delete this specific result?')) {
+                                          try {
+                                            await deleteDoc(doc(db, 'result_updated', res.id));
+                                            toast.success('Result deleted');
+                                            fetchResults(selectedTestIds);
+                                          } catch (err) {
+                                            handleFirestoreError(err, OperationType.DELETE, 'result_updated');
+                                          }
+                                        }
+                                      }}
+                                      title="Delete Result"
+                                      className="py-0.5 px-2 text-rose-600 hover:text-rose-700 bg-white hover:bg-rose-50 border border-rose-200 hover:border-rose-300 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm text-[8.5px] font-black uppercase tracking-tight h-[18px] leading-none"
+                                    >
+                                      <Trash2 size={10} strokeWidth={3} className="text-rose-500" />
+                                      <span>Delete</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Rank Cell */}
+                        <td className={cn(
+                          "text-center font-extrabold text-2xl px-4 py-5 border-b border-slate-100 w-32 font-sans",
                           res.isAbsent ? "text-slate-200" :
-                          res.rank === 1 ? "bg-amber-100 text-amber-700" :
-                          res.rank === 2 ? "bg-slate-100 text-slate-500" :
-                          res.rank === 3 ? "bg-orange-50 text-orange-600" :
-                          "text-slate-400"
+                          res.rank === 1 ? "text-amber-600 bg-amber-50/20 font-black" :
+                          res.rank === 2 ? "text-slate-600 bg-slate-50/20 font-black" :
+                          res.rank === 3 ? "text-orange-600 bg-orange-50/20 font-black" :
+                          "text-slate-400 bg-slate-50/5"
                         )}>
                           {res.isAbsent ? '—' : `#${res.rank}`}
-                        </div>
-                      </td>
-                      <td className="px-4 py-1.5 text-center text-xs font-black text-emerald-500">{res.isAbsent ? '—' : (res.correct || 0)}</td>
-                      <td className="px-4 py-1.5 text-center text-xs font-black text-rose-500">{res.isAbsent ? '—' : (res.wrong || 0)}</td>
-                      <td className="px-4 py-1.5 text-center text-xs font-black text-slate-300">{res.isAbsent ? '—' : (res.blank || 0)}</td>
-                      <td className="px-4 py-1.5 text-right flex items-center justify-end gap-2">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={() => { 
-                            setSelectedResult(res); 
-                            setDetailBackView('table');
-                            setAutoPrintDetail(false);
-                            setView('detail'); 
-                          }}
-                          className="hover:bg-blue-50 hover:text-blue-600 rounded-xl"
-                        >
-                          <ChevronRight size={18} strokeWidth={3} />
-                        </Button>
-                        {isAdmin && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={async (e) => { 
-                              e.stopPropagation();
-                              if (confirm('Delete this specific result?')) {
-                                try {
-                                  await deleteDoc(doc(db, 'result_updated', res.id));
-                                  toast.success('Result deleted');
-                                  fetchResults(selectedTestIds);
-                                } catch (err) {
-                                  handleFirestoreError(err, OperationType.DELETE, 'result_updated');
-                                }
-                              }
-                            }}
-                            className="hover:bg-rose-50 hover:text-rose-600 rounded-xl"
-                          >
-                            <Trash2 size={16} strokeWidth={3} />
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
             </table>
           </div>
         </Card>
@@ -4604,31 +4680,65 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       if (activeAnalysisView !== 'comparison') return;
       setIsLoadingAllComp(true);
       try {
-        let resultsQuery: any = collection(db, 'result_updated');
-        let studentsQuery: any = collection(db, 'students');
+        // Collect applicable tests based on active filters to scope comparison tightly
+        let applicableTests = [...tests];
+
+        if (selectedProgramId) {
+          applicableTests = applicableTests.filter(t => t.programId === selectedProgramId);
+        }
+        if (selectedBatchId) {
+          applicableTests = applicableTests.filter(t => t.batchIds?.includes(selectedBatchId) || t.batchId === selectedBatchId);
+        }
+
+        // Sort chronologically by date
+        applicableTests.sort((a, b) => {
+          const dateA = a.date || '';
+          const dateB = b.date || '';
+          return dateB.localeCompare(dateA);
+        });
+
+        // Resolve tests to query
+        // We always scope comparison to the active selection or the most recent 30 tests matching our scope.
+        let testIdsToQuery = selectedTestIds.length > 0
+          ? [...selectedTestIds]
+          : applicableTests.map(t => t.id);
+
+        if (testIdsToQuery.length === 0) {
+          setAllCompResults([]);
+          setIsLoadingAllComp(false);
+          return;
+        }
+
+        // Keep at most 30 tests to fit within the Firestore 'in' query limit of 30
+        if (testIdsToQuery.length > 30) {
+          testIdsToQuery = testIdsToQuery.slice(0, 30);
+        }
+
+        let resultsQuery: any;
+        let studentsQuery: any;
+
+        const resultsColl = collection(db, 'result_updated');
+        const studentsColl = collection(db, 'students');
+
+        const allowedCenters = (role === 'center' || role === 'center_level') && centerId && centerId !== 'all'
+          ? centerId.split(',').map(id => id.trim()).filter(Boolean)
+          : [];
 
         if (selectedBatchId) {
-          resultsQuery = query(collection(db, 'result_updated'), where('batchId', '==', selectedBatchId));
-          studentsQuery = query(collection(db, 'students'), where('batchId', '==', selectedBatchId));
+          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('batchId', '==', selectedBatchId));
+          studentsQuery = query(studentsColl, where('batchId', '==', selectedBatchId));
         } else if (selectedCenterId) {
-          resultsQuery = query(collection(db, 'result_updated'), where('centerId', '==', selectedCenterId));
-          studentsQuery = query(collection(db, 'students'), where('centerId', '==', selectedCenterId));
+          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('centerId', '==', selectedCenterId));
+          studentsQuery = query(studentsColl, where('centerId', '==', selectedCenterId));
         } else if (selectedProgramId) {
-          resultsQuery = query(collection(db, 'result_updated'), where('programId', '==', selectedProgramId));
-          studentsQuery = query(collection(db, 'students'), where('programId', '==', selectedProgramId));
+          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('programId', '==', selectedProgramId));
+          studentsQuery = query(studentsColl, where('programId', '==', selectedProgramId));
+        } else if (allowedCenters.length > 0) {
+          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('centerId', 'in', allowedCenters));
+          studentsQuery = query(studentsColl, where('centerId', 'in', allowedCenters));
         } else {
-          // If center role and no filters chosen, query where centerId is in allowedCenters instead of limit 150 globally
-          const allowedCenters = (role === 'center' || role === 'center_level') && centerId && centerId !== 'all'
-            ? centerId.split(',').map(id => id.trim()).filter(Boolean)
-            : [];
-          if (allowedCenters.length > 0) {
-            resultsQuery = query(collection(db, 'result_updated'), where('centerId', 'in', allowedCenters));
-            studentsQuery = query(collection(db, 'students'), where('centerId', 'in', allowedCenters));
-          } else {
-            // If no filters are chosen, load standard sample to prevent massive collection reads
-            resultsQuery = query(collection(db, 'result_updated'), limit(150));
-            studentsQuery = query(collection(db, 'students'), limit(150));
-          }
+          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery));
+          studentsQuery = query(studentsColl, limit(150));
         }
 
         const [resultsSnap, studentsSnap] = await Promise.all([

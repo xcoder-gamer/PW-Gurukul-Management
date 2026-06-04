@@ -101,10 +101,9 @@ service cloud.firestore {
     }
 
     function isValidResult(data) {
-      return data.keys().hasAll(['testId', 'regNo', 'score', 'accuracy'])
+      return data.keys().hasAll(['testId', 'regNo'])
         && data.testId is string && data.testId.size() <= 128
-        && data.regNo is string && data.regNo.size() <= 64
-        && data.score is number && data.accuracy is number;
+        && data.regNo is string && data.regNo.size() <= 64;
     }
 
     // --- COLLECTION RULES ---
