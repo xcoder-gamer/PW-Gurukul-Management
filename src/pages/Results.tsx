@@ -1517,6 +1517,14 @@ export default function Results() {
   }, [results, filters, selectedTestIds, resultsSortConfig, searchTerm]);
 
   const isMedicalFromTestsOnly = useMemo(() => {
+    if (filters?.programId) {
+      const prog = metaPrograms.find((p: any) => p.id === filters.programId);
+      if (prog) {
+        const name = (prog.programName || '').toUpperCase();
+        const code = (prog.programCode || '').toUpperCase();
+        return name.includes('NEET') || name.includes('MED') || code.includes('NEET') || code.includes('MED');
+      }
+    }
     if (selectedTestIds.length === 0) return false;
     const activeTest = tests.find(t => t.id === selectedTestIds[0]);
     if (!activeTest) return false;
@@ -1526,7 +1534,7 @@ export default function Results() {
     return progName.includes('NEET') || progName.includes('MED') || 
            progCode.includes('NEET') || progCode.includes('MED') || 
            (activeTest.pattern && activeTest.pattern.toUpperCase().includes('NEET'));
-  }, [selectedTestIds, tests, metaPrograms]);
+  }, [filters?.programId, selectedTestIds, tests, metaPrograms]);
 
   const allAvailableSubjects = useMemo(() => {
     const subjects = new Set<string>();
@@ -4306,8 +4314,13 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [expandedStudentSubject, setExpandedStudentSubject] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    // Initial sync removed as it is now managed by parent props
-  }, [tests.length]);
+    if (selectedTestIds && selectedTestIds.length > 0 && tests && tests.length > 0) {
+      const sampleTest = tests.find(t => t.id === selectedTestIds[0]);
+      if (sampleTest?.programId) {
+        setSelectedProgramId(sampleTest.programId);
+      }
+    }
+  }, [selectedTestIds, tests]);
 
   const aggregateStats = useMemo(() => {
     if (results.length === 0) return null;
@@ -5045,8 +5058,12 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         // Resolve tests to query
         // We always scope comparison to the active selection or the most recent 30 tests matching our scope.
         let testIdsToQuery = selectedTestIds.length > 0
-          ? [...selectedTestIds]
-          : applicableTests.map(t => t.id);
+          ? selectedTestIds.filter(id => applicableTests.some(t => t.id === id))
+          : [];
+
+        if (testIdsToQuery.length === 0) {
+          testIdsToQuery = applicableTests.map(t => t.id);
+        }
 
         if (testIdsToQuery.length === 0) {
           setAllCompResults([]);
@@ -5070,21 +5087,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           : [];
 
         if (selectedBatchId) {
-          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('batchId', '==', selectedBatchId));
           studentsQuery = query(studentsColl, where('batchId', '==', selectedBatchId));
         } else if (selectedCenterId) {
-          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('centerId', '==', selectedCenterId));
           studentsQuery = query(studentsColl, where('centerId', '==', selectedCenterId));
         } else if (selectedProgramId) {
-          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('programId', '==', selectedProgramId));
           studentsQuery = query(studentsColl, where('programId', '==', selectedProgramId));
         } else if (allowedCenters.length > 0) {
-          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery), where('centerId', 'in', allowedCenters));
           studentsQuery = query(studentsColl, where('centerId', 'in', allowedCenters));
         } else {
-          resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery));
           studentsQuery = query(studentsColl, limit(150));
         }
+
+        resultsQuery = query(resultsColl, where('testId', 'in', testIdsToQuery));
 
         const [resultsSnap, studentsSnap] = await Promise.all([
           getDocs(resultsQuery),
@@ -5228,7 +5242,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           }
         });
 
-        setAllCompResults(docs);
+        // Filter the mapped docs in-memory to prevent leaking data from other programs/centers/batches
+        const filteredDocs = docs.filter(r => {
+          if (selectedBatchId && r.batchId !== selectedBatchId) return false;
+          if (selectedCenterId && r.centerId !== selectedCenterId) return false;
+          if (selectedProgramId && r.programId !== selectedProgramId) return false;
+          if (allowedCenters.length > 0 && !allowedCenters.includes(r.centerId)) return false;
+          return true;
+        });
+
+        setAllCompResults(filteredDocs);
       } catch (err) {
         console.error("Failed to load all comparison results for grid with student resolution:", err);
       } finally {
@@ -5239,13 +5262,36 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   }, [activeAnalysisView, selectedProgramId, selectedCenterId, selectedBatchId]);
 
   const isMedicalProgram = useMemo(() => {
-    if (!selectedProgramId) return false;
-    const prog = metaPrograms.find((p: any) => p.id === selectedProgramId);
-    if (!prog) return false;
-    const name = (prog.programName || '').toUpperCase();
-    const code = (prog.programCode || '').toUpperCase();
-    return name.includes('NEET') || name.includes('MED') || code.includes('NEET') || code.includes('MED');
-  }, [selectedProgramId, metaPrograms]);
+    if (selectedProgramId) {
+      const prog = metaPrograms.find((p: any) => p.id === selectedProgramId);
+      if (prog) {
+        const name = (prog.programName || '').toUpperCase();
+        const code = (prog.programCode || '').toUpperCase();
+        return name.includes('NEET') || name.includes('MED') || code.includes('NEET') || code.includes('MED');
+      }
+    }
+    // Deep fallback check: see if any test in displays or selected tests is NEET/Medical
+    if (selectedTestIds && selectedTestIds.length > 0) {
+      const hasNeetPropDoc = selectedTestIds.some(tId => {
+        const testObj = tests.find(t => t.id === tId);
+        if (testObj) {
+          const pattern = (testObj.pattern || '').toUpperCase();
+          const name = (testObj.name || '').toUpperCase();
+          if (pattern === 'NEET' || name.includes('NEET') || name.includes('BIOLOGY') || name.includes('BOTANY') || name.includes('ZOOLOGY')) return true;
+          if (testObj.programId) {
+            const prog = metaPrograms.find((p: any) => p.id === testObj.programId);
+            if (prog) {
+              const pName = (prog.programName || '').toUpperCase();
+              if (pName.includes('NEET') || pName.includes('MED')) return true;
+            }
+          }
+        }
+        return false;
+      });
+      if (hasNeetPropDoc) return true;
+    }
+    return false;
+  }, [selectedProgramId, metaPrograms, selectedTestIds, tests]);
 
   const comparisonGridData = useMemo(() => {
     // Standardize allCompResults. If subjectStats is empty or missing, evaluate it dynamically.
