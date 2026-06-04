@@ -30,7 +30,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
+import * as XLSX from 'xlsx';
 import {
   ResponsiveContainer,
   BarChart,
@@ -70,7 +71,6 @@ import {
 } from 'firebase/firestore';
 import Papa from 'papaparse';
 
-import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { addLog, LogAction, LogCategory } from '../lib/logs';
 
@@ -2310,6 +2310,150 @@ export default function Results() {
     document.body.removeChild(link);
   };
 
+  const handleExportExcel = () => {
+    if (sortedResults.length === 0) {
+      toast.error('No results to export');
+      return;
+    }
+
+    const testName = selectedTestIds.length === 1 
+      ? tests.find(t => t.id === selectedTestIds[0])?.name || 'Results'
+      : `${selectedTestIds.length} Combined Test Series Results`;
+
+    const displaySubjects = allAvailableSubjects;
+
+    // Build the grid representation for the Excel Sheet
+    const aoa: any[][] = [
+      ["CONSOLIDATED STUDENT PERFORMANCE TRACKING & COMPARATIVE MATRIX"],
+      [`Test Series: ${testName}`],
+      [`Exported On: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} • Generated securely`],
+      [], // Spacing Row
+    ];
+
+    // Formatted Table Headers
+    const headers = [
+      'Rank',
+      'Roll No',
+      'Student Name',
+      'Batch',
+      'Center',
+      ...displaySubjects.map(sub => sub.toUpperCase()),
+      'Accuracy %',
+      'Correct (C)',
+      'Wrong (W)',
+      'Unattempted (U)',
+      'Total Score'
+    ];
+    aoa.push(headers);
+
+    // Formatted Student Rows
+    sortedResults.forEach(res => {
+      const scoreMaxLimit = selectedTestIds.length === 1 
+        ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 300) 
+        : (res.testMaxScore || 300);
+
+      const rollNo = res.regNo || '—';
+      const studentName = exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`;
+      const batchCode = res.batchCode || '—';
+      const centerName = res.centerName || '—';
+      const accuracy = res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`;
+      const correct = res.isAbsent ? '—' : (res.correct ?? 0);
+      const wrong = res.isAbsent ? '—' : (res.wrong ?? res.incorrect ?? 0);
+      const blank = res.isAbsent ? '—' : (res.blank ?? res.unattempted ?? 0);
+      const totalScore = res.isAbsent ? 'ABSENT' : `${res.score}/${scoreMaxLimit}`;
+
+      const row = [
+        res.isAbsent ? '—' : `${res.rank}`,
+        rollNo,
+        studentName,
+        batchCode,
+        centerName
+      ];
+
+      // Subject specific marks
+      displaySubjects.forEach(sub => {
+        const subScore = res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score ?? 0);
+        row.push(subScore);
+      });
+
+      row.push(accuracy);
+      row.push(correct);
+      row.push(wrong);
+      row.push(blank);
+      row.push(totalScore);
+
+      aoa.push(row);
+    });
+
+    // Spacer
+    aoa.push([]);
+
+    // Highest Score Summary Row
+    const maxRow: any[] = [
+      'MAX (HIGHEST)',
+      '',
+      '',
+      '',
+      ''
+    ];
+    displaySubjects.forEach(sub => {
+      const stat = headersStats[sub] || { highest: '—' };
+      maxRow.push(stat.highest);
+    });
+    maxRow.push(''); // No specific accuracy max formula
+    maxRow.push(''); // No correct max
+    maxRow.push(''); // No wrong max
+    maxRow.push(''); // No blank max
+    const totalMaxStat = headersStats['CUMULATIVE'] || { highest: '—' };
+    maxRow.push(totalMaxStat.highest);
+    aoa.push(maxRow);
+
+    // Average Score Summary Row
+    const avgRow: any[] = [
+      'AVERAGE SCORES',
+      '',
+      '',
+      '',
+      ''
+    ];
+    displaySubjects.forEach(sub => {
+      const stat = headersStats[sub] || { avg: '—' };
+      avgRow.push(stat.avg);
+    });
+    avgRow.push(''); // No accuracy average
+    avgRow.push(''); // No correct avg
+    avgRow.push(''); // No wrong avg
+    avgRow.push(''); // No blank avg
+    const totalAvgStat = headersStats['CUMULATIVE'] || { avg: '—' };
+    avgRow.push(totalAvgStat.avg);
+    aoa.push(avgRow);
+
+    // Instantiate and fill Excel Worksheet
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Define elegant column auto-spacing properties to avoid numerical #### errors or cutoffs
+    const colsWidths = [
+      { wch: 8 },  // Rank
+      { wch: 15 }, // Roll No
+      { wch: 28 }, // Student Name
+      { wch: 20 }, // Batch
+      { wch: 22 }, // Center
+      ...displaySubjects.map(() => ({ wch: 15 })), // Dynamic Subject Columns
+      { wch: 14 }, // Accuracy
+      { wch: 12 }, // Correct
+      { wch: 12 }, // Wrong
+      { wch: 15 }, // Unattempted
+      { wch: 16 }  // Total Score
+    ];
+    ws['!cols'] = colsWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Performance Matrix');
+
+    const sanitizedFileName = testName.replace(/[^a-z0-9]/gi, '_');
+    XLSX.writeFile(wb, `${sanitizedFileName}_Leaderboard.xlsx`);
+  };
+
   const handleExportPDF = () => {
     if (sortedResults.length === 0) {
       toast.error('No results to export');
@@ -2382,7 +2526,7 @@ export default function Results() {
       'Total Score'
     ];
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [tableHeaders],
       body: tableRows,
       startY: 36,
@@ -2395,11 +2539,11 @@ export default function Results() {
         halign: 'center'
       },
       columnStyles: {
-        0: { halign: 'center', width: 14 }, // Rank
-        1: { halign: 'center', width: 22 }, // Roll No
+        0: { halign: 'center', cellWidth: 14 }, // Rank
+        1: { halign: 'center', cellWidth: 22 }, // Roll No
         2: { halign: 'left', fontStyle: 'bold' }, // Name
-        3: { halign: 'center', width: 24 }, // Batch
-        4: { halign: 'left', width: 26 }  // Center
+        3: { halign: 'center', cellWidth: 24 }, // Batch
+        4: { halign: 'left', cellWidth: 26 }  // Center
       },
       styles: {
         fontSize: 8,
@@ -2586,6 +2730,11 @@ export default function Results() {
             <Button variant="outline" size="md" onClick={handleExportCSV} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
               <Download size={18} className="mr-2 text-emerald-600" />
               Export CSV
+            </Button>
+
+            <Button variant="outline" size="md" onClick={handleExportExcel} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
+              <FileSpreadsheet size={18} className="mr-2 text-emerald-700" />
+              Export Excel
             </Button>
 
             <Button variant="outline" size="md" onClick={handleExportPDF} disabled={selectedTestIds.length === 0 || results.length === 0} className="border-slate-200">
