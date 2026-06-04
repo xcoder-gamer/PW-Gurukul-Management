@@ -2465,21 +2465,60 @@ export default function Results() {
       ? tests.find(t => t.id === selectedTestIds[0])?.name || 'Results'
       : `${selectedTestIds.length} Combined Test Series Results`;
 
-    // Premium styling header
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.setTextColor(15, 23, 42); // slate-900
-    doc.text("STUDENT PERFORMANCE LEADERBOARD", 14, 18);
+    // Dynamic brand elements matching the screen header exactly
+    const progText = filters.programId ? (metaPrograms.find((p: any) => p.id === filters.programId)?.programName || '—') : 'All Programs';
+    const centerText = filters.centerId ? (metaCenters.find((c: any) => c.id === filters.centerId)?.centerName || '—') : 'All Centers';
+    const batchText = filters.batchId ? (metaBatches.find((b: any) => b.id === filters.batchId)?.batchCode || '—') : 'All Batches';
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
+    // Premium styling top header section mirroring page margins
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
     doc.setTextColor(100, 116, 139); // slate-500
-    doc.text(`Test Series: ${testName}`, 14, 25);
-    doc.text(`Exported On: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} • Generated securely`, 14, 30);
+    doc.text("DIVISION (PROGRAM)", 14, 12);
+    doc.text("CENTER", 74, 12);
+    doc.text("CLASS BATCH", 134, 12);
+
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42); // slate-900
+    doc.text(progText.toUpperCase(), 14, 17);
+    doc.text(centerText.toUpperCase(), 74, 17);
+    doc.text(batchText.toUpperCase(), 134, 17);
+
+    // Official Report metadata alignment block on top right
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("OFFICIAL REPORT", 283, 12, { align: "right" });
+    doc.setFontSize(10);
+    doc.setTextColor(15, 23, 42);
+    doc.text(new Date().toLocaleDateString(), 283, 17, { align: "right" });
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Consolidated ${selectedTestIds.length} Test${selectedTestIds.length > 1 ? 's' : ''}`, 283, 21, { align: "right" });
+
+    // Prominent tracking title banner
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(15, 23, 42);
+    doc.text("CONSOLIDATED STUDENT PERFORMANCE TRACKING & COMPARATIVE MATRIX", 14, 27);
 
     const displaySubjects = allAvailableSubjects;
     
-    // AutoTable row mapping
+    // Build the exact columns mirroring the beautiful screen grid
+    const tableHeaders = [
+      'STUDENT PROFILE\nRoll-No / Program Batch',
+      ...displaySubjects.map(sub => {
+        const stat = headersStats[sub] || { highest: '—', avg: '—' };
+        return `${sub.toUpperCase()}\nMax: ${stat.highest} | Avg: ${stat.avg}`;
+      }),
+      (() => {
+        const stat = headersStats['CUMULATIVE'] || { highest: '—', avg: '—' };
+        return `CUMULATIVE\nMax: ${stat.highest} | Avg: ${stat.avg}`;
+      })(),
+      'RANK\nTest Rank'
+    ];
+
+    // Format body rows vertically aligned with score and correct/wrong/unattempted tags
     const tableRows = sortedResults.map(res => {
       const scoreMaxLimit = selectedTestIds.length === 1 
         ? (tests.find(t => t.id === selectedTestIds[0])?.maxScore || 300) 
@@ -2489,77 +2528,112 @@ export default function Results() {
       const studentName = exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`;
       const batchCode = res.batchCode || '—';
       const centerName = res.centerName || '—';
-      const accuracy = res.isAbsent ? '—' : `${Math.round(res.accuracy || 0)}%`;
-      const metrics = res.isAbsent ? '—' : `C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}`;
-      const totalScore = res.isAbsent ? 'ABSENT' : `${res.score}/${scoreMaxLimit}`;
 
-      const row = [
-        res.isAbsent ? '—' : `#${res.rank}`,
-        rollNo,
+      // student profile cells combining location, name and enrollment roll IDs
+      const profileCell = [
         studentName,
-        batchCode,
-        centerName
-      ];
+        `#${rollNo}   ${batchCode}`,
+        `${centerName.toUpperCase()}${res.type ? `  •  ${res.type}` : ''}`
+      ].join('\n');
 
-      // Dynamic subject scores
-      displaySubjects.forEach(sub => {
-        const subScore = res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score ?? 0);
-        row.push(subScore);
+      if (res.isAbsent) {
+        return [
+          profileCell,
+          ...displaySubjects.map(() => '—\nAbsent'),
+          '— / —\nAbsent',
+          '—'
+        ];
+      }
+
+      // subject cells presenting both score and correct/wrong/unattempted breakdown on line 2
+      const subjectCells = displaySubjects.map(sub => {
+        const stats = res.subjectStats?.[sub];
+        const score = stats?.score ?? 0;
+        const correct = stats?.correct ?? 0;
+        const wrong = stats?.wrong ?? 0;
+        const blank = stats?.blank ?? 0;
+        return `${score}\nC:${correct} | W:${wrong} | U:${blank}`;
       });
 
-      row.push(accuracy);
-      row.push(metrics);
-      row.push(totalScore);
+      // cumulative cell presenting overall score, accuracy and dynamic target tags
+      const cumulativeCell = [
+        `${res.score}/${scoreMaxLimit}`,
+        `${Math.round(res.accuracy || 0)}% Acc  •  C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}`,
+        res.rankTarget ? `${res.rankTarget}` : ''
+      ].filter(Boolean).join('\n');
 
-      return row;
+      // Rank cell
+      const rankCell = `#${res.rank}`;
+
+      return [
+        profileCell,
+        ...subjectCells,
+        cumulativeCell,
+        rankCell
+      ];
     });
 
-    const tableHeaders = [
-      'Rank',
-      'Roll No',
-      'Student Name',
-      'Batch',
-      'Center',
-      ...displaySubjects.map(sub => sub.toUpperCase()),
-      'Accuracy',
-      'C | W | U',
-      'Total Score'
-    ];
+    // Dynamic width calculation matching available landscape paper dimensions (269mm total table width)
+    const columnStyles: any = {
+      0: { cellWidth: 70, halign: 'left' }
+    };
+    columnStyles[1 + displaySubjects.length] = { cellWidth: 55, halign: 'center' };
+    columnStyles[2 + displaySubjects.length] = { cellWidth: 20, halign: 'center' };
+
+    const remainingWidth = 269 - 70 - 55 - 20;
+    const subColWidth = remainingWidth / displaySubjects.length;
+    for (let i = 1; i <= displaySubjects.length; i++) {
+      columnStyles[i] = { cellWidth: subColWidth, halign: 'center' };
+    }
 
     autoTable(doc, {
       head: [tableHeaders],
       body: tableRows,
-      startY: 36,
-      theme: 'striped',
+      startY: 33,
+      theme: 'grid',
       headStyles: {
-        fillColor: [15, 23, 42], // Deep navy/slate-900
+        fillColor: [10, 25, 47], // premium dark brand blue (matching top block of screenshot)
         textColor: [255, 255, 255],
         fontStyle: 'bold',
         fontSize: 8.5,
-        halign: 'center'
+        halign: 'center',
+        valign: 'middle',
+        cellPadding: 4
       },
-      columnStyles: {
-        0: { halign: 'center', cellWidth: 14 }, // Rank
-        1: { halign: 'center', cellWidth: 22 }, // Roll No
-        2: { halign: 'left', fontStyle: 'bold' }, // Name
-        3: { halign: 'center', cellWidth: 24 }, // Batch
-        4: { halign: 'left', cellWidth: 26 }  // Center
-      },
+      columnStyles: columnStyles,
       styles: {
         fontSize: 8,
-        cellPadding: 3,
-        valign: 'middle'
+        cellPadding: 4,
+        valign: 'middle',
+        lineColor: [226, 232, 240] // light slate-200 thin grid outline
       },
       didParseCell: (data: any) => {
-        // Center-align columns starting from dynamic subject scores up to total score
-        if (data.column.index >= 5) {
-          data.cell.styles.halign = 'center';
+        // Format Student Profile Name specifically (make it slightly prominent on first line)
+        if (data.row.section === 'body' && data.column.index === 0) {
+          data.cell.styles.fontStyle = 'normal';
         }
-        // Style the custom total score Column
-        if (data.column.index === tableHeaders.length - 1) {
-          data.cell.styles.fontStyle = 'bold';
-          if (data.cell.raw !== 'ABSENT') {
-            data.cell.styles.textColor = [37, 99, 235]; // Blue-600
+
+        // Apply Gold / Silver / Bronze coloring rules with high-contrast text to rank cells
+        if (data.row.section === 'body' && data.column.index === 2 + displaySubjects.length) {
+          const val = data.cell.raw;
+          if (val && typeof val === 'string' && val.startsWith('#')) {
+            const num = parseInt(val.replace('#', ''), 10);
+            if (num === 1) {
+              data.cell.styles.fillColor = [254, 243, 199]; // amber-100
+              data.cell.styles.textColor = [120, 53, 4]; // amber-900
+              data.cell.styles.fontStyle = 'bold';
+            } else if (num === 2) {
+              data.cell.styles.fillColor = [241, 245, 249]; // slate-100
+              data.cell.styles.textColor = [51, 65, 85]; // slate-700
+              data.cell.styles.fontStyle = 'bold';
+            } else if (num === 3) {
+              data.cell.styles.fillColor = [255, 237, 213]; // orange-100
+              data.cell.styles.textColor = [124, 45, 18]; // orange-900
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.textColor = [71, 85, 105]; // slate-600
+              data.cell.styles.fontStyle = 'semibold';
+            }
           }
         }
       }
