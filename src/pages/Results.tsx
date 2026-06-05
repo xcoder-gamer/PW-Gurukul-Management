@@ -2271,6 +2271,37 @@ export default function Results() {
     }
   };
 
+  const getSubjectDetails = (res: any, subName: string) => {
+    let lookupName: 'Physics' | 'Chemistry' | 'Math' | 'Botany' | 'Zoology' | 'Biology' = 'Physics';
+    const subLower = subName.toLowerCase();
+    if (subLower === 'physics') {
+      lookupName = 'Physics';
+    } else if (subLower === 'chemistry') {
+      lookupName = 'Chemistry';
+    } else if (subLower === 'math' || subLower === 'maths' || subLower === 'mathematics') {
+      lookupName = 'Math';
+    } else if (subLower === 'botany') {
+      lookupName = 'Botany';
+    } else if (subLower === 'zoology') {
+      lookupName = 'Zoology';
+    } else if (subLower === 'biology') {
+      lookupName = 'Biology';
+    }
+
+    const score = getSubjectScore(res, lookupName);
+    const subObj = getRawSubjectObj(res, lookupName);
+    const correct = res.isAbsent ? '—' : (subObj ? (subObj.correct ?? 0) : 0);
+    const wrong = res.isAbsent ? '—' : (subObj ? (subObj.wrong ?? subObj.incorrect ?? 0) : 0);
+    const blank = res.isAbsent ? '—' : (subObj ? (subObj.blank ?? subObj.unattempted ?? 0) : 0);
+
+    return {
+      score: res.isAbsent ? '—' : (score === '—' ? 0 : score),
+      correct,
+      wrong,
+      blank
+    };
+  };
+
   const handleExportCSV = () => {
     if (sortedResults.length === 0) {
       toast.error('No results to export');
@@ -2282,28 +2313,33 @@ export default function Results() {
       : 'Combined_Results';
     
     const exportData = sortedResults.map(res => {
-      const pScore = res.subjectStats?.Physics?.score || 0;
-      const cScore = res.subjectStats?.Chemistry?.score || 0;
-      const mScore = res.subjectStats?.Math?.score || res.subjectStats?.Maths?.score || res.subjectStats?.Mathematics?.score || 0;
-
-      return {
+      const baseRow: any = {
         'Rank': res.rank,
         'Reg No.': res.regNo,
         'Student Name': exportWithName ? res.studentName : `STUDENT_${res.regNo || 'ANON'}`,
         'Center': res.centerName || '—',
         'Batch': res.batchName || '—',
         'Total Score': res.score,
-        'Estimated Rank Bucket': determineRankBucket(res.score, res.testMaxScore, res.testPattern),
-        'Physics': pScore,
-        'Chemistry': cScore,
-        'Mathematics': mScore,
-        'Correct': res.correct || 0,
-        'Wrong': res.wrong || 0,
-        'Unattempted': res.blank || 0,
-        'Accuracy %': `${Math.round(res.accuracy || 0)}%`,
-        'Test Date': res.testDate,
-        'Test Name': res.testName
+        'Estimated Rank Bucket': determineRankBucket(res.score, res.testMaxScore, res.testPattern || res.pattern),
       };
+
+      allAvailableSubjects.forEach(sub => {
+        const subDetails = getSubjectDetails(res, sub);
+        const subLabel = sub === 'Math' ? 'Mathematics' : sub;
+        baseRow[`${subLabel} Score`] = subDetails.score;
+        baseRow[`${subLabel} Correct`] = subDetails.correct;
+        baseRow[`${subLabel} Incorrect`] = subDetails.wrong;
+        baseRow[`${subLabel} Unattempted`] = subDetails.blank;
+      });
+
+      baseRow['Correct'] = res.correct || 0;
+      baseRow['Wrong'] = res.wrong || 0;
+      baseRow['Unattempted'] = res.blank || 0;
+      baseRow['Accuracy %'] = `${Math.round(res.accuracy || 0)}%`;
+      baseRow['Test Date'] = res.testDate;
+      baseRow['Test Name'] = res.testName;
+
+      return baseRow;
     });
 
     const csv = Papa.unparse(exportData);
@@ -2338,20 +2374,30 @@ export default function Results() {
       [], // Spacing Row
     ];
 
-    // Formatted Table Headers
+    // Formatted Table Headers with detailed subject columns
     const headers = [
       'Rank',
       'Roll No',
       'Student Name',
       'Batch',
-      'Center',
-      ...displaySubjects.map(sub => sub.toUpperCase()),
+      'Center'
+    ];
+
+    displaySubjects.forEach(sub => {
+      const subLabel = sub === 'Math' ? 'MATHEMATICS' : sub.toUpperCase();
+      headers.push(`${subLabel} SCORE`);
+      headers.push(`${subLabel} CORRECT (C)`);
+      headers.push(`${subLabel} WRONG (W)`);
+      headers.push(`${subLabel} UNATTEMPTED (U)`);
+    });
+
+    headers.push(
       'Accuracy %',
       'Correct (C)',
       'Wrong (W)',
       'Unattempted (U)',
       'Total Score'
-    ];
+    );
     aoa.push(headers);
 
     // Formatted Student Rows
@@ -2378,10 +2424,13 @@ export default function Results() {
         centerName
       ];
 
-      // Subject specific marks
+      // Subject specific detailed columns
       displaySubjects.forEach(sub => {
-        const subScore = res.isAbsent ? '—' : (res.subjectStats?.[sub]?.score ?? 0);
-        row.push(subScore);
+        const subDetails = getSubjectDetails(res, sub);
+        row.push(subDetails.score);
+        row.push(subDetails.correct);
+        row.push(subDetails.wrong);
+        row.push(subDetails.blank);
       });
 
       row.push(accuracy);
@@ -2407,6 +2456,9 @@ export default function Results() {
     displaySubjects.forEach(sub => {
       const stat = headersStats[sub] || { highest: '—' };
       maxRow.push(stat.highest);
+      maxRow.push(''); // Spacer under Correct column offset
+      maxRow.push(''); // Spacer under Wrong column offset
+      maxRow.push(''); // Spacer under Unattempted column offset
     });
     maxRow.push(''); // No specific accuracy max formula
     maxRow.push(''); // No correct max
@@ -2427,6 +2479,9 @@ export default function Results() {
     displaySubjects.forEach(sub => {
       const stat = headersStats[sub] || { avg: '—' };
       avgRow.push(stat.avg);
+      avgRow.push(''); // Spacer under Correct column offset
+      avgRow.push(''); // Spacer under Wrong column offset
+      avgRow.push(''); // Spacer under Unattempted column offset
     });
     avgRow.push(''); // No accuracy average
     avgRow.push(''); // No correct avg
@@ -2446,7 +2501,12 @@ export default function Results() {
       { wch: 28 }, // Student Name
       { wch: 20 }, // Batch
       { wch: 22 }, // Center
-      ...displaySubjects.map(() => ({ wch: 15 })), // Dynamic Subject Columns
+      ...displaySubjects.flatMap(() => [
+        { wch: 15 }, // Subject Score
+        { wch: 13 }, // Subject Correct
+        { wch: 13 }, // Subject Wrong
+        { wch: 15 }  // Subject Unattempted
+      ]),
       { wch: 14 }, // Accuracy
       { wch: 12 }, // Correct
       { wch: 12 }, // Wrong
