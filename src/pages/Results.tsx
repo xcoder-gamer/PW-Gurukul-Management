@@ -1470,7 +1470,11 @@ export default function Results() {
     }
 
     if (filters.programId) {
-      filtered = filtered.filter(r => r.programId === filters.programId);
+      filtered = filtered.filter(r => {
+        if (r.programId === filters.programId) return true;
+        const testObj = tests.find(t => t.id === r.testId);
+        return testObj?.programId === filters.programId;
+      });
     }
 
     if (filters.centerId) {
@@ -2344,9 +2348,9 @@ export default function Results() {
           // Resolve batch and center names using cached metadata
           const batchId = studentInfo.batchId || res.batchId;
           const centerId = studentInfo.centerId || res.centerId;
-          const programId = studentInfo.programId || res.programId;
-          
           const batchDetail = findBatchSafely(batchId, metaBatches);
+          const programId = studentInfo.programId || res.programId || batchDetail?.programId;
+          
           const centerDetail = findCenterSafely(centerId, metaCenters);
           const programDetail = findProgramSafely(programId, metaPrograms);
           
@@ -2370,7 +2374,7 @@ export default function Results() {
           // If no student document exists but ids are in result, still map batch/center names dynamically from cached metadata if possible!
           const batchDetail = findBatchSafely(res.batchId, metaBatches);
           const centerDetail = findCenterSafely(res.centerId, metaCenters);
-          const programDetail = findProgramSafely(res.programId, metaPrograms);
+          const programDetail = findProgramSafely(batchDetail?.programId || res.programId, metaPrograms);
           
           return {
             ...res,
@@ -2378,7 +2382,7 @@ export default function Results() {
             centerName: centerDetail?.centerName || res.centerName,
             batchId: batchDetail?.id || res.batchId,
             batchName: batchDetail?.batchName || res.batchName,
-            programId: programDetail?.id || res.programId,
+            programId: programDetail?.id || batchDetail?.programId || res.programId,
             programName: programDetail?.programName || res.programName,
           };
         }
@@ -4563,7 +4567,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
 
       // Apply Program/Division Filter
-      if (selectedProgramId && res.programId !== selectedProgramId) return;
+      if (selectedProgramId && res.programId !== selectedProgramId) {
+        const testObj = tests.find(t => t.id === res.testId);
+        if (testObj?.programId !== selectedProgramId) return;
+      }
 
       // Apply Center Filter
       if (selectedCenterId && res.centerId !== selectedCenterId) return;
@@ -5046,7 +5053,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     
     results.forEach(res => {
       if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
-      if (selectedProgramId && res.programId !== selectedProgramId) return;
+      if (selectedProgramId && res.programId !== selectedProgramId) {
+        const testObj = tests.find(t => t.id === res.testId);
+        if (testObj?.programId !== selectedProgramId) return;
+      }
       if (selectedCenterId && res.centerId !== selectedCenterId) return;
       if (selectedBatchId && res.batchId !== selectedBatchId) return;
       if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
@@ -5092,7 +5102,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         avgAccuracy
       };
     }).sort((a, b) => b.avgScore - a.avgScore);
-  }, [results, selectedTestIds, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestModes, filters.studentType]);
+  }, [results, selectedTestIds, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestModes, filters.studentType, tests]);
 
   // Max Avg Comparison on Test calculation
   const testMaxAvgData = useMemo(() => {
@@ -5100,7 +5110,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     
     results.forEach(res => {
       if (selectedTestIds.length > 0 && !selectedTestIds.includes(res.testId)) return;
-      if (selectedProgramId && res.programId !== selectedProgramId) return;
+      if (selectedProgramId && res.programId !== selectedProgramId) {
+        const testObj = tests.find(t => t.id === res.testId);
+        if (testObj?.programId !== selectedProgramId) return;
+      }
       if (selectedCenterId && res.centerId !== selectedCenterId) return;
       if (selectedBatchId && res.batchId !== selectedBatchId) return;
       if (selectedTestModes.length > 0 && !selectedTestModes.includes(res.testMode || 'offline')) return;
@@ -5427,9 +5440,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           if (studentInfo) {
             const bId = studentInfo.batchId || res.batchId;
             const cId = studentInfo.centerId || res.centerId;
-            const pId = studentInfo.programId || res.programId;
-
             const batchDetail = findBatchSafely(bId, metaBatches);
+            const pId = studentInfo.programId || res.programId || batchDetail?.programId;
+
             const centerDetail = findCenterSafely(cId, metaCenters);
             const programDetail = findProgramSafely(pId, metaPrograms);
 
@@ -5451,14 +5464,14 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           } else {
             const batchDetail = findBatchSafely(res.batchId, metaBatches);
             const centerDetail = findCenterSafely(res.centerId, metaCenters);
-            const programDetail = findProgramSafely(res.programId, metaPrograms);
+            const programDetail = findProgramSafely(batchDetail?.programId || res.programId, metaPrograms);
             return {
               ...res,
               centerId: centerDetail?.id || res.centerId,
               centerName: centerDetail?.centerName || res.centerName,
               batchId: batchDetail?.id || res.batchId,
               batchName: batchDetail?.batchName || res.batchName,
-              programId: programDetail?.id || res.programId,
+              programId: programDetail?.id || batchDetail?.programId || res.programId,
               programName: programDetail?.programName || res.programName,
               trueGlobalRank: trueRankVal,
             };
@@ -5469,7 +5482,10 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         const filteredDocs = docs.filter(r => {
           if (selectedBatchId && r.batchId !== selectedBatchId) return false;
           if (selectedCenterId && r.centerId !== selectedCenterId) return false;
-          if (selectedProgramId && r.programId !== selectedProgramId) return false;
+          if (selectedProgramId && r.programId !== selectedProgramId) {
+            const testObj = tests.find(t => t.id === r.testId);
+            if (testObj?.programId !== selectedProgramId) return false;
+          }
           if (allowedCenters.length > 0 && !allowedCenters.includes(r.centerId)) return false;
           return true;
         });
@@ -5482,7 +5498,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       }
     };
     fetchAllCompResults();
-  }, [activeAnalysisView, selectedProgramId, selectedCenterId, selectedBatchId]);
+  }, [activeAnalysisView, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestIds, tests]);
 
   const isMedicalProgram = useMemo(() => {
     if (selectedProgramId) {
