@@ -667,8 +667,10 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
           studentData = { id: studentDoc.id, ...studentDoc.data() };
         } else {
           // Fallback if the doc isn't indexed by uppercase ID
-          const qS = query(collection(db, 'students'), where('regNo', '==', regNo));
-          const snapS = await getDocs(qS);
+          let snapS = await getDocs(query(collection(db, 'students'), where('regNo', '==', regNo)));
+          if (snapS.empty && !isNaN(Number(regNo))) {
+            snapS = await getDocs(query(collection(db, 'students'), where('regNo', '==', Number(regNo))));
+          }
           if (!snapS.empty) {
             studentData = { id: snapS.docs[0].id, ...snapS.docs[0].data() };
           }
@@ -683,7 +685,12 @@ function StudentAnalysisDashboard({ regNo, onBack }: StudentAnalysisDashboardPro
         // 3. Fetch all result attempts
         const qR = query(collection(db, 'result_updated'), where('regNo', '==', regNo));
         const snapR = await getDocs(qR);
-        const attemptsData = snapR.docs.map(d => ({ id: d.id, ...d.data() }));
+        let attemptsData = snapR.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (attemptsData.length === 0 && !isNaN(Number(regNo))) {
+          const qRNum = query(collection(db, 'result_updated'), where('regNo', '==', Number(regNo)));
+          const snapRNum = await getDocs(qRNum);
+          attemptsData = snapRNum.docs.map(d => ({ id: d.id, ...d.data() }));
+        }
         setAttempts(attemptsData);
       } catch (err) {
         console.error("Failed to fetch student analysis data:", err);
@@ -1687,18 +1694,23 @@ export default function Results() {
 
       let studentMaster: any[] = [];
       if (regNosInFile.length > 0) {
-        const queryRegsSet = new Set<string>();
-        regNosInFile.forEach(r => {
-          queryRegsSet.add(r.toUpperCase());
-          queryRegsSet.add(r.toLowerCase());
-        });
-        const queryRegs = Array.from(queryRegsSet);
-
-        // Firestore limit is 30 for 'in' queries
-        const chunksOf30: string[][] = [];
-        for (let offset = 0; offset < queryRegs.length; offset += 30) {
-          chunksOf30.push(queryRegs.slice(offset, offset + 30));
-        }
+         const queryRegsSet = new Set<any>();
+         regNosInFile.forEach(r => {
+           const clean = r.trim();
+           queryRegsSet.add(clean.toUpperCase());
+           queryRegsSet.add(clean.toLowerCase());
+           const maybeNum = Number(clean);
+           if (!isNaN(maybeNum)) {
+             queryRegsSet.add(maybeNum);
+           }
+         });
+         const queryRegs = Array.from(queryRegsSet);
+ 
+         // Firestore limit is 30 for 'in' queries
+         const chunksOf30: any[][] = [];
+         for (let offset = 0; offset < queryRegs.length; offset += 30) {
+           chunksOf30.push(queryRegs.slice(offset, offset + 30));
+         }
         const studentChunks = await Promise.all(
           chunksOf30.map(async (chunk) => {
             const snap = await getDocs(query(collection(db, 'students'), where('regNo', 'in', chunk)));
@@ -1875,9 +1887,18 @@ export default function Results() {
         // Fetch students in chunks of 30 for missing regNos
         const missingRegNos = regNos.filter(regNo => !localStudentCache[regNo]);
         if (missingRegNos.length > 0) {
-          const chunks: string[][] = [];
-          for (let i = 0; i < missingRegNos.length; i += 30) {
-            chunks.push(missingRegNos.slice(i, i + 30));
+          const queryValsSet = new Set<any>();
+          missingRegNos.forEach(r => {
+            queryValsSet.add(r);
+            const maybeNum = Number(r);
+            if (!isNaN(maybeNum)) {
+              queryValsSet.add(maybeNum);
+            }
+          });
+          const queryVals = Array.from(queryValsSet);
+          const chunks: any[][] = [];
+          for (let i = 0; i < queryVals.length; i += 30) {
+            chunks.push(queryVals.slice(i, i + 30));
           }
 
           for (const chunk of chunks) {
@@ -2309,9 +2330,18 @@ export default function Results() {
         const missingRegNos = uniqueRegNos.filter(regNo => !studentCache[regNo]);
         
         if (missingRegNos.length > 0) {
-          const chunks: string[][] = [];
-          for (let i = 0; i < missingRegNos.length; i += 30) {
-            chunks.push(missingRegNos.slice(i, i + 30));
+          const queryValsSet = new Set<any>();
+          missingRegNos.forEach(r => {
+            queryValsSet.add(r);
+            const maybeNum = Number(r);
+            if (!isNaN(maybeNum)) {
+              queryValsSet.add(maybeNum);
+            }
+          });
+          const queryVals = Array.from(queryValsSet);
+          const chunks: any[][] = [];
+          for (let i = 0; i < queryVals.length; i += 30) {
+            chunks.push(queryVals.slice(i, i + 30));
           }
           
           try {
@@ -4015,8 +4045,10 @@ export default function Results() {
                           const val = manualData.regNo.trim();
                           if (val.length >= 3) {
                             try {
-                              const q = query(collection(db, 'students'), where('regNo', '==', val));
-                              const snap = await getDocs(q);
+                              let snap = await getDocs(query(collection(db, 'students'), where('regNo', '==', val)));
+                              if (snap.empty && !isNaN(Number(val))) {
+                                snap = await getDocs(query(collection(db, 'students'), where('regNo', '==', Number(val))));
+                              }
                               if (!snap.empty) {
                                 const sData = snap.docs[0].data();
                                 setManualData(prev => ({
@@ -4236,9 +4268,10 @@ export default function Results() {
 
                       // 1. Fetch data surgically (only the student record)
                       // Batches and Centers are already locally cached in useMetadata context
-                      const [studentsSnap] = await Promise.all([
-                        getDocs(query(collection(db, 'students'), where('regNo', '==', manualData.regNo)))
-                      ]);
+                      let studentsSnap = await getDocs(query(collection(db, 'students'), where('regNo', '==', manualData.regNo)));
+                      if (studentsSnap.empty && !isNaN(Number(manualData.regNo))) {
+                        studentsSnap = await getDocs(query(collection(db, 'students'), where('regNo', '==', Number(manualData.regNo))));
+                      }
 
                       const studentInfo = studentsSnap.docs[0]?.data() || {};
                       const qbgMap = metaQbgMap;
@@ -5249,7 +5282,15 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           where('regNo', '==', selectedCompStudentReg)
         );
         const snap = await getDocs(historyQuery);
-        const historyDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        let historyDocs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        if (historyDocs.length === 0 && !isNaN(Number(selectedCompStudentReg))) {
+          const historyQueryNum = query(
+            collection(db, 'result_updated'),
+            where('regNo', '==', Number(selectedCompStudentReg))
+          );
+          const snapNum = await getDocs(historyQueryNum);
+          historyDocs = snapNum.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        }
         
         // Sort history chronologically by testDate (ascending)
         const sorted = historyDocs.sort((a, b) => {
@@ -5399,9 +5440,18 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
         const missingRegNos = uniqueRegNos.filter(regNo => !studentMap[regNo] && !studentCache[regNo]);
         
         if (missingRegNos.length > 0) {
-          const chunks: string[][] = [];
-          for (let i = 0; i < missingRegNos.length; i += 30) {
-            chunks.push(missingRegNos.slice(i, i + 30));
+          const queryValsSet = new Set<any>();
+          missingRegNos.forEach(r => {
+            queryValsSet.add(r);
+            const maybeNum = Number(r);
+            if (!isNaN(maybeNum)) {
+              queryValsSet.add(maybeNum);
+            }
+          });
+          const queryVals = Array.from(queryValsSet);
+          const chunks: any[][] = [];
+          for (let i = 0; i < queryVals.length; i += 30) {
+            chunks.push(queryVals.slice(i, i + 30));
           }
           try {
             const studentSnaps = await Promise.all(
@@ -5453,6 +5503,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               centerName: centerDetail?.centerName || res.centerName,
               batchId: batchDetail?.id || bId,
               batchName: batchDetail?.batchName || res.batchName,
+              batchCode: batchDetail?.batchCode || studentInfo.batchCode || res.batchCode || '',
               programId: programDetail?.id || pId,
               programName: programDetail?.programName || res.programName,
               regNo: studentInfo.regNo || res.regNo,
@@ -5471,6 +5522,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               centerName: centerDetail?.centerName || res.centerName,
               batchId: batchDetail?.id || res.batchId,
               batchName: batchDetail?.batchName || res.batchName,
+              batchCode: batchDetail?.batchCode || res.batchCode || '',
               programId: programDetail?.id || batchDetail?.programId || res.programId,
               programName: programDetail?.programName || res.programName,
               trueGlobalRank: trueRankVal,
@@ -5632,6 +5684,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       regNo: string;
       batchId: string;
       batchName: string;
+      batchCode?: string;
       centerId: string;
       centerName: string;
       programId: string;
@@ -5650,6 +5703,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           regNo: reg,
           batchId: res.batchId || '',
           batchName: res.batchName || '—',
+          batchCode: res.batchCode || '',
           centerId: res.centerId || '',
           centerName: res.centerName || '—',
           programId: res.programId || '',
@@ -8239,8 +8293,8 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                   <span className="font-mono text-[9px] font-black text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                                     #{studentItem.regNo}
                                   </span>
-                                  <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate max-w-[130px]" title={studentItem.batchName}>
-                                    {studentItem.batchName}
+                                  <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate max-w-[130px]" title={studentItem.batchCode || studentItem.batchName}>
+                                    {studentItem.batchCode || studentItem.batchName}
                                   </span>
                                 </div>
                               )}
@@ -9125,7 +9179,15 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
           where('regNo', '==', result.regNo)
         );
         const snap = await getDocs(q);
-        const attemptsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        let attemptsData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        if (attemptsData.length === 0 && !isNaN(Number(result.regNo))) {
+          const qNum = query(
+            collection(db, 'result_updated'),
+            where('regNo', '==', Number(result.regNo))
+          );
+          const snapNum = await getDocs(qNum);
+          attemptsData = snapNum.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
 
         const attemptsWithRanks = await Promise.all(
           attemptsData.map(async (attempt: any) => {
@@ -9183,8 +9245,10 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
           return;
         }
         try {
-          const q = query(collection(db, "students"), where("regNo", "==", result.regNo));
-          const snap = await getDocs(q);
+          let snap = await getDocs(query(collection(db, "students"), where("regNo", "==", result.regNo)));
+          if (snap.empty && !isNaN(Number(result.regNo))) {
+            snap = await getDocs(query(collection(db, "students"), where("regNo", "==", Number(result.regNo))));
+          }
           if (!snap.empty) {
             const sData = snap.docs[0].data();
             const fullSData = { id: snap.docs[0].id, ...sData };
