@@ -1969,62 +1969,225 @@ export default function Results() {
   };
 
   const handleDeleteOrphanedResults = async () => {
-    if (!window.confirm('Are you sure you want to search the database for orphaned results (results with no matching test master) and delete them?')) {
-      return;
+    const isTestSelected = selectedTestIds.length === 1;
+    let selectedTestName = '';
+    let selectedTestId = '';
+    if (isTestSelected) {
+      selectedTestId = selectedTestIds[0];
+      selectedTestName = tests.find(t => t.id === selectedTestId)?.name || 'Selected Test';
+    }
+
+    let mode: 'global' | 'selected' | null = null;
+    if (isTestSelected) {
+      if (window.confirm(`Would you like to clear orphan/duplicate results SPECIFICALLY for the selected test: "${selectedTestName}"?\n\n- Click OK to scan & clean this selected test.\n- Click Cancel to perform Global Orphan Clean (removes results of deleted tests) across the entire database.`)) {
+        mode = 'selected';
+      } else {
+        if (window.confirm('Would you like to perform a Global Orphan Clean instead? (Removes results with no matching test master across the entire database)')) {
+          mode = 'global';
+        } else {
+          return;
+        }
+      }
+    } else {
+      if (!window.confirm('Are you sure you want to search the database for orphaned results (results with no matching test master) and delete them globally?')) {
+        return;
+      }
+      mode = 'global';
     }
 
     setLoading(true);
-    const toastId = toast.loading('Searching for orphaned results...');
+    const toastId = toast.loading(mode === 'selected' ? 'Analyzing results for selected test...' : 'Searching for orphaned results...');
     try {
-      // 1. Resolve all active test IDs from local state (saves an expensive table scan of tests!)
-      const testIds = new Set(tests.map(t => t.id));
+      if (mode === 'global') {
+        // 1. Resolve all active test IDs from local state (saves an expensive table scan of tests!)
+        const testIds = new Set(tests.map(t => t.id));
 
-      // 2. Fetch results with a safety limit of 1500 to avoid exceeding the Firestore memory/query allocation limits
-      const resultsSnap = await getDocs(query(collection(db, 'result_updated'), limit(1500)));
-      const orphanedDocs = resultsSnap.docs.filter(docSnap => {
-        const data = docSnap.data();
-        return !data.testId || !testIds.has(data.testId);
-      });
+        // 2. Fetch results with a safety limit of 1500 to avoid exceeding the Firestore memory/query allocation limits
+        const resultsSnap = await getDocs(query(collection(db, 'result_updated'), limit(1500)));
+        const orphanedDocs = resultsSnap.docs.filter(docSnap => {
+          const data = docSnap.data();
+          return !data.testId || !testIds.has(data.testId);
+        });
 
-      if (orphanedDocs.length === 0) {
-        toast.success('No orphaned results found in the database!', { id: toastId });
-        setLoading(false);
-        return;
+        if (orphanedDocs.length === 0) {
+          toast.success('No orphaned results found in the database!', { id: toastId });
+          setLoading(false);
+          return;
+        }
+
+        if (!window.confirm(`Found ${orphanedDocs.length} orphaned result(s) with no matching test master in the database. Do you want to permanently delete them? This action CANNOT be undone.`)) {
+          toast.error('Clean up canceled by user', { id: toastId });
+          setLoading(false);
+          return;
+        }
+
+        // 3. Delete them in batches/parallels
+        const CHUNK_SIZE = 15;
+        const docIdsToDelete = orphanedDocs.map(d => d.id);
+        const chunks = [];
+        for (let i = 0; i < docIdsToDelete.length; i += CHUNK_SIZE) {
+          chunks.push(docIdsToDelete.slice(i, i + CHUNK_SIZE));
+        }
+
+        for (const chunk of chunks) {
+          await Promise.all(
+            chunk.map(id => deleteDoc(doc(db, 'result_updated', id)))
+          );
+        }
+
+        // Also log this
+        await addLog({
+          userId: user?.uid || 'system',
+          userEmail: user?.email || 'unknown',
+          action: LogAction.DELETE,
+          category: LogCategory.TEST,
+          resourceId: 'bulk-orphans',
+          resourceName: 'Orphaned Results Cleanup',
+          details: `Deleted ${orphanedDocs.length} orphaned results from the database`,
+        });
+
+        toast.success(`Successfully deleted ${orphanedDocs.length} orphaned results!`, { id: toastId });
+        fetchResults(selectedTestIds);
+      } else {
+        // mode === 'selected'
+        // 1. Fetch all results for this test
+        const resultsSnap = await getDocs(query(collection(db, 'result_updated'), where('testId', '==', selectedTestId)));
+        
+        if (resultsSnap.empty) {
+          toast.success('No database result entries found for this test.', { id: toastId });
+          setLoading(false);
+          return;
+        }
+
+        // 2. Group by regNo to find duplicates
+        const groupedByRegNo: Record<string, typeof resultsSnap.docs> = {};
+        resultsSnap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          const regNo = String(data.regNo || '').trim().toUpperCase();
+          if (regNo) {
+            if (!groupedByRegNo[regNo]) {
+              groupedByRegNo[regNo] = [];
+            }
+            groupedByRegNo[regNo].push(docSnap);
+          }
+        });
+
+        const duplicateDocsToDelete: typeof resultsSnap.docs = [];
+        Object.entries(groupedByRegNo).forEach(([regNo, docs]) => {
+          if (docs.length > 1) {
+            // Sort by a combination of updatedAt, createdAt, or doc ID to keep the latest one
+            docs.sort((a, b) => {
+              const aTime = a.data().updatedAt?.seconds || a.data().createdAt?.seconds || 0;
+              const bTime = b.data().updatedAt?.seconds || b.data().createdAt?.seconds || 0;
+              if (bTime !== aTime) return bTime - aTime; // higher/newer time first
+              return b.id.localeCompare(a.id); // fallback to doc ID sorting
+            });
+            // Keep the first (most recent), delete all subsequent ones
+            for (let i = 1; i < docs.length; i++) {
+              duplicateDocsToDelete.push(docs[i]);
+            }
+          }
+        });
+
+        // 3. Find deleted/non-existent students
+        const uniqueRegNos = Array.from(new Set(resultsSnap.docs.map(docSnap => String(docSnap.data().regNo || '').trim().toUpperCase()).filter(Boolean)));
+        const existingRegNos = new Set<string>();
+
+        if (uniqueRegNos.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < uniqueRegNos.length; i += 30) {
+            chunks.push(uniqueRegNos.slice(i, i + 30));
+          }
+          const studentSnaps = await Promise.all(
+            chunks.map(chunk => getDocs(query(collection(db, 'students'), where('regNo', 'in', chunk))))
+          );
+          studentSnaps.forEach(snap => {
+            snap.docs.forEach(docSnap => {
+              const data = docSnap.data();
+              if (data.regNo) {
+                existingRegNos.add(String(data.regNo).trim().toUpperCase());
+              }
+            });
+          });
+        }
+
+        const studentOrphanDocs = resultsSnap.docs.filter(docSnap => {
+          const data = docSnap.data();
+          const regNo = String(data.regNo || '').trim().toUpperCase();
+          return !regNo || !existingRegNos.has(regNo);
+        });
+
+        // Map to unique deletions
+        const allDocsToDelete = new Map<string, { reason: string; regNo: string; studentName: string }>();
+
+        duplicateDocsToDelete.forEach(docSnap => {
+          const data = docSnap.data();
+          allDocsToDelete.set(docSnap.id, {
+            reason: 'Duplicate student record',
+            regNo: data.regNo || '',
+            studentName: data.studentName || '—'
+          });
+        });
+
+        studentOrphanDocs.forEach(docSnap => {
+          if (!allDocsToDelete.has(docSnap.id)) {
+            const data = docSnap.data();
+            allDocsToDelete.set(docSnap.id, {
+              reason: 'Deleted student profile (regNo not found)',
+              regNo: data.regNo || '',
+              studentName: data.studentName || '—'
+          });
+          }
+        });
+
+        if (allDocsToDelete.size === 0) {
+          toast.success('Awesome! No orphaned or duplicate results found for this test.', { id: toastId });
+          setLoading(false);
+          return;
+        }
+
+        const detailsTextArray: string[] = [];
+        allDocsToDelete.forEach((info) => {
+          detailsTextArray.push(`• RegNo: ${info.regNo} (${info.studentName}) - ${info.reason}`);
+        });
+
+        // Let the user view the list and confirm deletion
+        const confirmMsg = `Found ${allDocsToDelete.size} issue(s) of individual orphan/duplicate records for this test:\n\n${detailsTextArray.slice(0, 10).join('\n')}${detailsTextArray.length > 10 ? `\n...and ${detailsTextArray.length - 10} more` : ''}\n\nDo you want to permanently delete these ${allDocsToDelete.size} orphaned/duplicate record(s)? This action CANNOT be undone.`;
+
+        if (!window.confirm(confirmMsg)) {
+          toast.error('Clean up canceled by user', { id: toastId });
+          setLoading(false);
+          return;
+        }
+
+        // Proceed to delete
+        const docIdsToDelete = Array.from(allDocsToDelete.keys());
+        const CHUNK_SIZE = 15;
+        const chunks = [];
+        for (let i = 0; i < docIdsToDelete.length; i += CHUNK_SIZE) {
+          chunks.push(docIdsToDelete.slice(i, i + CHUNK_SIZE));
+        }
+
+        for (const chunk of chunks) {
+          await Promise.all(
+            chunk.map(id => deleteDoc(doc(db, 'result_updated', id)))
+          );
+        }
+
+        // Add history log
+        await addLog({
+          userId: user?.uid || 'system',
+          userEmail: user?.email || 'unknown',
+          action: LogAction.DELETE,
+          category: LogCategory.TEST,
+          resourceId: selectedTestId,
+          resourceName: selectedTestName,
+          details: `Deleted ${allDocsToDelete.size} orphaned/duplicate results for test: ${selectedTestName}`,
+        });
+
+        toast.success(`Successfully deleted ${allDocsToDelete.size} orphaned/duplicate results for "${selectedTestName}"!`, { id: toastId });
+        fetchResults(selectedTestIds);
       }
-
-      if (!window.confirm(`Found ${orphanedDocs.length} orphaned result(s) with no matching test master in the database. Do you want to permanently delete them? This action CANNOT be undone.`)) {
-        toast.error('Clean up canceled by user', { id: toastId });
-        setLoading(false);
-        return;
-      }
-
-      // 3. Delete them in batches/parallels
-      const CHUNK_SIZE = 15;
-      const docIdsToDelete = orphanedDocs.map(d => d.id);
-      const chunks = [];
-      for (let i = 0; i < docIdsToDelete.length; i += CHUNK_SIZE) {
-        chunks.push(docIdsToDelete.slice(i, i + CHUNK_SIZE));
-      }
-
-      for (const chunk of chunks) {
-        await Promise.all(
-          chunk.map(id => deleteDoc(doc(db, 'result_updated', id)))
-        );
-      }
-
-      // Also log this
-      await addLog({
-        userId: user?.uid || 'system',
-        userEmail: user?.email || 'unknown',
-        action: LogAction.DELETE,
-        category: LogCategory.TEST,
-        resourceId: 'bulk-orphans',
-        resourceName: 'Orphaned Results Cleanup',
-        details: `Deleted ${orphanedDocs.length} orphaned results from the database`,
-      });
-
-      toast.success(`Successfully deleted ${orphanedDocs.length} orphaned results!`, { id: toastId });
-      fetchResults(selectedTestIds);
     } catch (err: any) {
       console.error('Failed to cleanup orphaned results:', err);
       toast.error(err.message || 'Cleanup failed', { id: toastId });
