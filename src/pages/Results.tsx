@@ -2794,11 +2794,10 @@ export default function Results() {
       const batchCode = res.batchCode || '—';
       const centerName = res.centerName || '—';
 
-      // student profile cells combining location, name and enrollment roll IDs
+      // student profile cells combining location, name and enrollment roll IDs in 2 compact lines
       const profileCell = [
         studentName,
-        `#${rollNo}   ${batchCode}`,
-        `${centerName.toUpperCase()}${res.type ? `  •  ${res.type}` : ''}`
+        `#${rollNo}  •  ${batchCode}  •  ${centerName.toUpperCase()}${res.type ? ` (${res.type})` : ''}`
       ].join('\n');
 
       if (res.isAbsent) {
@@ -2820,12 +2819,11 @@ export default function Results() {
         return `${score}\nC:${correct} | W:${wrong} | U:${blank}`;
       });
 
-      // cumulative cell presenting overall score, accuracy and dynamic target tags
+      // cumulative cell presenting overall score, accuracy and dynamic target tags in 2 lines
       const cumulativeCell = [
-        `${res.score}/${scoreMaxLimit}`,
-        `${Math.round(res.accuracy || 0)}% Acc  •  C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}`,
-        res.rankTarget ? `${res.rankTarget}` : ''
-      ].filter(Boolean).join('\n');
+        `${res.score}/${scoreMaxLimit}  •  ${Math.round(res.accuracy || 0)}% Acc`,
+        `C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}${res.rankTarget ? `  •  ${res.rankTarget}` : ''}`
+      ].join('\n');
 
       // Rank cell
       const rankCell = `#${res.rank}`;
@@ -2840,12 +2838,12 @@ export default function Results() {
 
     // Dynamic width calculation matching available landscape paper dimensions (269mm total table width)
     const columnStyles: any = {
-      0: { cellWidth: 70, halign: 'left' }
+      0: { cellWidth: 72, halign: 'left' }
     };
-    columnStyles[1 + displaySubjects.length] = { cellWidth: 55, halign: 'center' };
-    columnStyles[2 + displaySubjects.length] = { cellWidth: 20, halign: 'center' };
+    columnStyles[1 + displaySubjects.length] = { cellWidth: 54, halign: 'center' };
+    columnStyles[2 + displaySubjects.length] = { cellWidth: 18, halign: 'center' };
 
-    const remainingWidth = 269 - 70 - 55 - 20;
+    const remainingWidth = 269 - 72 - 54 - 18;
     const subColWidth = remainingWidth / displaySubjects.length;
     for (let i = 1; i <= displaySubjects.length; i++) {
       columnStyles[i] = { cellWidth: subColWidth, halign: 'center' };
@@ -2860,15 +2858,15 @@ export default function Results() {
         fillColor: [10, 25, 47], // premium dark brand blue (matching top block of screenshot)
         textColor: [255, 255, 255],
         fontStyle: 'bold',
-        fontSize: 8.5,
+        fontSize: 7.5,
         halign: 'center',
         valign: 'middle',
-        cellPadding: 4
+        cellPadding: 1.8
       },
       columnStyles: columnStyles,
       styles: {
-        fontSize: 8,
-        cellPadding: 4,
+        fontSize: 6.8,
+        cellPadding: 1.5,
         valign: 'middle',
         lineColor: [226, 232, 240] // light slate-200 thin grid outline
       },
@@ -4556,6 +4554,13 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       setStudentSearch(initialSearch);
     }
   }, [initialSearch]);
+  const [compPage, setCompPage] = useState<number>(1);
+  const [compPageSize, setCompPageSize] = useState<number>(25);
+
+  useEffect(() => {
+    setCompPage(1);
+  }, [studentSearch, selectedProgramId, selectedCenterId, selectedBatchId, comparisonTestMode]);
+
   const [studentSearchFocused, setStudentSearchFocused] = useState(false);
   const [isFilterVisible, setIsFilterVisible] = useState(false);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(['correct', 'incorrect', 'unattempted', 'accuracy']);
@@ -6142,6 +6147,384 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const renderComparisonTable = (studentsList: any[], isPrintView = false) => {
+    return (
+      <table className={cn(
+        "w-full border-collapse text-left",
+        isPrintView ? "text-[7.5px]" : "text-xs"
+      )}>
+        <thead>
+          <tr className="bg-[#0b1329] text-white border-b border-slate-800">
+            <th 
+              rowSpan={2} 
+              className={cn(
+                "border-r-[3.5px] border-r-amber-700/80 align-middle sticky left-0 bg-[#0b1329] z-50",
+                isPrintView ? "px-2 py-1.5 min-w-[120px]" : "px-6 py-5 min-w-[260px] shadow-[4px_0_10px_rgba(0,0,0,0.2)]"
+              )}
+            >
+              <div className={cn("font-black uppercase font-mono text-blue-400 font-bold", isPrintView ? "text-[8px]" : "text-xs")}>Student Profile</div>
+              <div className={cn("font-bold uppercase font-mono opacity-80", isPrintView ? "text-[6.5px] mt-0.5" : "text-[9px] mt-0.5")}>Roll-No / Program Batch</div>
+            </th>
+            {displayedTests.map((testMeta, idx) => {
+              const testLabel = idx === 0 ? '🏆 LATEST TEST' : '📅 PREVIOUS TEST';
+              return (
+                <th 
+                  key={testMeta.testId} 
+                  colSpan={isMedicalProgram ? 6 : 5} 
+                  className={cn(
+                    "text-center border-r-[3.5px] border-r-amber-700/80 font-extrabold font-mono",
+                    isPrintView ? "px-1.5 py-1 uppercase text-[7.5px]" : "px-4 py-3 uppercase text-[10px]",
+                    idx === 0 ? "bg-[#0b1c3a] text-blue-200" : "bg-[#0f172a] text-slate-300"
+                  )}
+                >
+                  <div className={cn("font-black tracking-wider flex items-center justify-center gap-1", isPrintView ? "text-[8px]" : "text-[11px]")}>
+                    {testLabel}
+                  </div>
+                  <div className={cn("font-bold normal-case tracking-tight truncate mx-auto font-sans", isPrintView ? "text-[7.5px] mt-0.5 max-w-[120px]" : "text-[10px] mt-0.5 max-w-[240px]")} title={testMeta.testName}>
+                    {testMeta.testName || '—'}
+                  </div>
+                  <div className={cn("font-bold tracking-widest font-mono opacity-90", isPrintView ? "text-[6px] mt-0.5" : "text-[8px] mt-0.5")}>
+                    DATE: {testMeta.testDate || '—'}
+                  </div>
+                </th>
+              );
+            })}
+          </tr>
+
+          <tr className={cn(
+            "bg-[#121b33] text-slate-200 border-b border-slate-755 font-bold uppercase tracking-wider font-mono",
+            isPrintView ? "text-[7px]" : "text-[9px]"
+          )}>
+            {displayedTests.map((testMeta) => (
+              <React.Fragment key={testMeta.testId}>
+                <th className={cn("text-center border-r border-slate-705 text-slate-300 bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[50px]" : "p-2.5 min-w-[110px]")}>
+                  <div className={cn("font-extrabold uppercase tracking-widest text-[#f59e0b] bg-[#f59e0b]/10 border border-[#f59e0b]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Physics</div>
+                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                      <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Physics?.max ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                      <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Physics?.avg ?? '—'}</span>
+                    </div>
+                  </div>
+                </th>
+                <th className={cn("text-center border-r border-slate-705 text-slate-300 bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[50px]" : "p-2.5 min-w-[110px]")}>
+                  <div className={cn("font-extrabold uppercase tracking-widest text-[#2dd4bf] bg-[#2dd4bf]/10 border border-[#2dd4bf]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Chemistry</div>
+                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                      <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Chemistry?.max ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                      <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Chemistry?.avg ?? '—'}</span>
+                    </div>
+                  </div>
+                </th>
+                {isMedicalProgram ? (
+                  <>
+                    <th className={cn("text-center border-r border-slate-705 text-blue-350 bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[50px]" : "p-2.5 min-w-[110px]")}>
+                      <div className={cn("font-extrabold uppercase tracking-widest text-[#10b981] bg-[#10b981]/10 border border-[#10b981]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Botany</div>
+                      <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none">
+                        <div className="flex justify-between px-0.5 items-center">
+                          <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                          <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Botany?.max ?? '—'}</span>
+                        </div>
+                        <div className="flex justify-between px-0.5 items-center">
+                          <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                          <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Botany?.avg ?? '—'}</span>
+                        </div>
+                      </div>
+                    </th>
+                    <th className={cn("text-center border-r border-slate-705 text-blue-350 bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[50px]" : "p-2.5 min-w-[110px]")}>
+                      <div className={cn("font-extrabold uppercase tracking-widest text-[#a3e635] bg-[#a3e635]/10 border border-[#a3e635]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Zoology</div>
+                      <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-blue-400/80 space-y-0.5 font-extrabold normal-case select-none font-bold">
+                        <div className="flex justify-between px-0.5 items-center">
+                          <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                          <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Zoology?.max ?? '—'}</span>
+                        </div>
+                        <div className="flex justify-between px-0.5 items-center">
+                          <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                          <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Zoology?.avg ?? '—'}</span>
+                        </div>
+                      </div>
+                    </th>
+                  </>
+                ) : (
+                  <th className={cn("text-center border-r border-slate-705 text-emerald-355 bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[50px]" : "p-2.5 min-w-[115px]")}>
+                    <div className={cn("font-extrabold uppercase tracking-widest text-[#38bdf8] bg-[#38bdf8]/10 border border-[#38bdf8]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Mathematics</div>
+                    <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-emerald-400/80 space-y-0.5 font-extrabold normal-case select-none font-bold">
+                      <div className="flex justify-between px-0.5 items-center">
+                        <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                        <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Math?.max ?? '—'}</span>
+                      </div>
+                      <div className="flex justify-between px-0.5 items-center">
+                        <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                        <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Math?.avg ?? '—'}</span>
+                      </div>
+                    </div>
+                  </th>
+                )}
+                <th className={cn("text-center border-r border-slate-705 text-white bg-[#121b33] font-bold", isPrintView ? "p-1 min-w-[65px]" : "p-2.5 min-w-[130px]")}>
+                  <div className={cn("font-extrabold uppercase tracking-wider text-[#ea580c] bg-[#ea580c]/10 border border-[#ea580c]/50 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7px] px-1 py-0.5" : "text-[10px] px-2.5 py-1")}>Cumulative</div>
+                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono leading-tight text-slate-300 space-y-0.5 font-extrabold normal-case select-none">
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">MAX:</span>
+                      <span className="text-emerald-400 font-black">{testWiseStats[testMeta.testId]?.Total?.max ?? '—'}</span>
+                    </div>
+                    <div className="flex justify-between px-0.5 items-center">
+                      <span className="text-slate-400 font-bold uppercase">AVG:</span>
+                      <span className="text-amber-500 font-black">{testWiseStats[testMeta.testId]?.Total?.avg ?? '—'}</span>
+                    </div>
+                  </div>
+                </th>
+                <th className={cn("text-center border-r-[3.5px] border-r-amber-700/80 text-amber-400 bg-[#0d1427] font-bold", isPrintView ? "p-1 min-w-[40px]" : "p-2.5 min-w-[80px]")}>
+                  <div className={cn("font-extrabold uppercase tracking-wider text-[#facc15] bg-[#facc15]/10 border border-[#facc15]/40 rounded-full inline-block mb-1 shadow-sm", isPrintView ? "text-[7.5px] px-1.5 py-0.5" : "text-[10px] px-2.5 py-1")}>Rank</div>
+                  <div className="mt-1 pt-1 border-t border-slate-700/60 font-mono text-[8px] leading-tight text-slate-405 font-extrabold normal-case select-none text-center">
+                    Test Rank
+                  </div>
+                </th>
+              </React.Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {studentsList.map((studentItem) => {
+            return (
+              <tr 
+                key={studentItem.regNo + '_' + studentItem.studentName} 
+                className={cn(
+                  "hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300",
+                  isPrintView && "page-break-inside-avoid"
+                )}
+              >
+                <td className={cn(
+                  "border-r-[3.5px] border-r-amber-700/70 bg-white z-10 hover:bg-slate-50",
+                  isPrintView ? "px-2 py-1 sticky left-0" : "px-4 py-2 sticky left-0 shadow-[4px_0_10px_rgba(0,0,0,0.04)]"
+                )}>
+                  <div className={cn("font-extrabold text-slate-900 tracking-tight font-sans text-left leading-tight", isPrintView ? "text-[10.5px]" : "text-xs")}>
+                    {exportWithName ? studentItem.studentName : `STUDENT_${studentItem.regNo || 'ANON'}`}
+                  </div>
+                  {exportWithName && (
+                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                      <span className={cn("font-mono font-black text-slate-500 bg-slate-100 rounded border border-slate-200", isPrintView ? "text-[8px] px-1 py-0 leading-none" : "text-[9px] px-1.5 py-0.5")}>
+                        #{studentItem.regNo}
+                      </span>
+                      <span className={cn("font-black text-indigo-600 bg-indigo-50 rounded border border-indigo-100 uppercase tracking-wider font-mono truncate", isPrintView ? "text-[8px] px-1 py-0 max-w-[90px] leading-none" : "text-[9px] px-1.5 py-0.5 max-w-[130px]")} title={studentItem.batchCode || studentItem.batchName}>
+                        {studentItem.batchCode || studentItem.batchName}
+                      </span>
+                    </div>
+                  )}
+                  {exportWithName && studentItem.centerName && (
+                    <div className={cn("text-slate-400 font-extrabold uppercase mt-0.5 tracking-widest font-mono text-left leading-none", isPrintView ? "text-[7px]" : "text-[8px]")}>{studentItem.centerName}</div>
+                  )}
+                </td>
+
+                {displayedTests.map((testMeta, tIdx) => {
+                  const testRes = studentItem.testResults[testMeta.testId];
+                  const isCurrentTest = tIdx === 0;
+                  const rankVal = testRes?.rank ? `#${testRes.rank}` : '—';
+                  
+                  if (!testRes) {
+                    return (
+                      <React.Fragment key={testMeta.testId}>
+                        <td className={cn("text-center align-middle border-r border-slate-100 text-slate-305 font-mono font-medium bg-slate-50/20", isPrintView ? "p-1" : "p-3")}>—</td>
+                        <td className={cn("text-center align-middle border-r border-slate-100 text-slate-305 font-mono font-medium bg-slate-50/20", isPrintView ? "p-1" : "p-3")}>—</td>
+                        {isMedicalProgram ? (
+                          <>
+                            <td className={cn("text-center align-middle border-r border-slate-100 text-slate-305 font-mono font-medium bg-slate-50/20", isPrintView ? "p-1" : "p-3")}>—</td>
+                            <td className={cn("text-center align-middle border-r border-slate-100 text-slate-305 font-mono font-medium bg-slate-50/20", isPrintView ? "p-1" : "p-3")}>—</td>
+                          </>
+                        ) : (
+                          <td className={cn("text-center align-middle border-r border-slate-100 text-slate-305 font-mono font-medium bg-slate-50/20", isPrintView ? "p-1" : "p-3")}>—</td>
+                        )}
+                        <td className={cn("text-center align-middle border-r border-slate-100 bg-slate-50/30 text-slate-401 italic font-medium font-sans", isPrintView ? "p-1 text-[8px]" : "p-3 text-[10px]")}>Absent</td>
+                        <td className={cn("text-center align-middle border-r-[3.5px] border-r-amber-700/70 bg-slate-50/40 text-slate-401 font-mono font-medium", isPrintView ? "p-1" : "p-3")}>—</td>
+                      </React.Fragment>
+                    );
+                  }
+
+                  const phScore = getSubjectScore(testRes, 'Physics');
+                  const chScore = getSubjectScore(testRes, 'Chemistry');
+                  const botScore = getSubjectScore(testRes, 'Botany');
+                  const zooScore = getSubjectScore(testRes, 'Zoology');
+                  const mathScore = getSubjectScore(testRes, 'Math');
+
+                  const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
+                  const testObj = tests.find(t => t.id === testMeta.testId);
+                  const maxScoreVal = testObj?.maxScore || testRes.maxScore || (testObj?.pattern === 'NEET' || isMedicalProgram ? 720 : 360);
+                  const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
+
+                  return (
+                    <React.Fragment key={testMeta.testId}>
+                      <td className={cn("text-center align-middle border-r border-slate-205 hover:bg-slate-50 transition-colors", isPrintView ? "p-1" : "p-3")}>
+                        {testRes.isAbsent ? (
+                          <span className="text-slate-305 font-mono">—</span>
+                        ) : (
+                          <div className={isPrintView ? "space-y-0.5" : "space-y-1"}>
+                            <div className={cn("font-extrabold text-[#0f172a] font-sans leading-none", isPrintView ? "text-[11px]" : "text-sm")}>{phScore}</div>
+                            <div className={cn("flex justify-center items-center gap-1 font-bold font-mono leading-none", isPrintView ? "text-[8px]" : "text-[9.5px]")}>
+                              <span className="text-emerald-600">C:{getRawSubjectObj(testRes, 'Physics')?.correct ?? 0}</span>
+                              <span className="text-slate-300 font-normal">|</span>
+                              <span className="text-rose-500">W:{getRawSubjectObj(testRes, 'Physics')?.wrong ?? getRawSubjectObj(testRes, 'Physics')?.incorrect ?? 0}</span>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
+                      <td className={cn("text-center align-middle border-r border-slate-205 hover:bg-slate-50 transition-colors", isPrintView ? "p-1" : "p-3")}>
+                        {testRes.isAbsent ? (
+                          <span className="text-slate-355 font-mono">—</span>
+                        ) : (
+                          <div className={isPrintView ? "space-y-0.5" : "space-y-1"}>
+                            <div className={cn("font-extrabold text-[#0f172a] font-sans leading-none", isPrintView ? "text-[11px]" : "text-sm")}>{chScore}</div>
+                            <div className={cn("flex justify-center items-center gap-1 font-bold font-mono leading-none", isPrintView ? "text-[8px]" : "text-[9.5px]")}>
+                              <span className="text-emerald-600">C:{getRawSubjectObj(testRes, 'Chemistry')?.correct ?? 0}</span>
+                              <span className="text-slate-305 font-normal">|</span>
+                              <span className="text-rose-500">W:{getRawSubjectObj(testRes, 'Chemistry')?.wrong ?? getRawSubjectObj(testRes, 'Chemistry')?.incorrect ?? 0}</span>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
+                      {isMedicalProgram ? (
+                        <>
+                          <td className={cn("text-center align-middle border-r border-slate-205 hover:bg-slate-50 transition-colors", isPrintView ? "p-1" : "p-3")}>
+                            {testRes.isAbsent ? (
+                              <span className="text-slate-305 font-mono">—</span>
+                            ) : (
+                              <div className={isPrintView ? "space-y-0.5" : "space-y-1"}>
+                                <div className={cn("font-extrabold text-[#0f172a] font-sans leading-none", isPrintView ? "text-[11px]" : "text-sm")}>{botScore}</div>
+                                <div className={cn("flex justify-center items-center gap-1 font-bold font-mono leading-none", isPrintView ? "text-[8px]" : "text-[9.5px]")}>
+                                  <span className="text-emerald-600">C:{getRawSubjectObj(testRes, 'Botany')?.correct ?? 0}</span>
+                                  <span className="text-slate-303 font-normal">|</span>
+                                  <span className="text-rose-500">W:{getRawSubjectObj(testRes, 'Botany')?.wrong ?? getRawSubjectObj(testRes, 'Botany')?.incorrect ?? 0}</span>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+
+                          <td className={cn("text-center align-middle border-r border-slate-205 hover:bg-slate-50 transition-colors", isPrintView ? "p-1" : "p-3")}>
+                            {testRes.isAbsent ? (
+                              <span className="text-slate-305 font-mono">—</span>
+                            ) : (
+                              <div className={isPrintView ? "space-y-0.5" : "space-y-1"}>
+                                <div className={cn("font-extrabold text-[#0f172a] font-sans leading-none", isPrintView ? "text-[11px]" : "text-sm")}>{zooScore}</div>
+                                <div className={cn("flex justify-center items-center gap-1 font-bold font-mono leading-none", isPrintView ? "text-[8px]" : "text-[9.5px]")}>
+                                  <span className="text-emerald-600">C:{getRawSubjectObj(testRes, 'Zoology')?.correct ?? 0}</span>
+                                  <span className="text-slate-303 font-normal">|</span>
+                                  <span className="text-rose-500">W:{getRawSubjectObj(testRes, 'Zoology')?.wrong ?? getRawSubjectObj(testRes, 'Zoology')?.incorrect ?? 0}</span>
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                        </>
+                      ) : (
+                        <td className={cn("text-center align-middle border-r border-slate-205 hover:bg-slate-50 transition-colors", isPrintView ? "p-1" : "p-3")}>
+                          {testRes.isAbsent ? (
+                            <span className="text-slate-205 font-mono">—</span>
+                          ) : (
+                            <div className={isPrintView ? "space-y-0.5" : "space-y-1"}>
+                              <div className={cn("font-extrabold text-[#0f172a] font-sans leading-none", isPrintView ? "text-[11px]" : "text-sm")}>{mathScore}</div>
+                              <div className={cn("flex justify-center items-center gap-1 font-bold font-mono leading-none", isPrintView ? "text-[8px]" : "text-[9.5px]")}>
+                                <span className="text-emerald-600">C:{getRawSubjectObj(testRes, 'Math')?.correct ?? 0}</span>
+                                <span className="text-slate-303 font-normal">|</span>
+                                <span className="text-rose-500">W:{getRawSubjectObj(testRes, 'Math')?.wrong ?? getRawSubjectObj(testRes, 'Math')?.incorrect ?? 0}</span>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                      )}
+
+                      <td 
+                        className={cn(
+                          "text-center align-middle border-r border-slate-200 bg-blue-50/10 min-w-[105px] transition-colors relative group/cumulative-cell",
+                          isPrintView ? "p-1" : "p-3",
+                          (!testRes.isAbsent && !isPrintView && onSelectResult) && "cursor-pointer hover:bg-blue-100/60"
+                        )}
+                        onClick={() => {
+                          if (!testRes.isAbsent && onSelectResult && !isPrintView) {
+                            onSelectResult(testRes);
+                          }
+                        }}
+                      >
+                        {testRes.isAbsent ? (
+                          <span className={cn("text-slate-300 italic font-sans font-medium", isPrintView ? "text-[8px]" : "text-[10px]")}>Absent</span>
+                        ) : (
+                          <div className={isPrintView ? "space-y-0.5" : "space-y-1.5"}>
+                            <div className="font-extrabold text-slate-900 tracking-tighter group-hover/cumulative-cell:text-blue-700 transition-colors leading-none">
+                              <span className={cn("font-black text-slate-905 font-sans", isPrintView ? "text-[11px]" : "text-sm")}>{scoreVal}</span>
+                              <span className={cn("font-bold text-slate-400 font-sans", isPrintView ? "text-[8px]" : "text-[10px]")}>/{maxScoreVal}</span>
+                            </div>
+                            <div className={cn("font-extrabold text-[#10b981] leading-none font-sans", isPrintView ? "text-[8px]" : "text-[10.5px]")}>
+                              {accuracyVal} Acc
+                            </div>
+                            {!isPrintView ? (
+                              <div className="flex justify-center items-center gap-1 text-[9.5px] font-extrabold font-mono py-0.5 px-1.5 bg-white/80 border border-slate-200 rounded text-slate-700 shadow-2xs mx-auto max-w-[95px]">
+                                <span className="text-emerald-600" title="Total Correct">C:{testRes.correct ?? 0}</span>
+                                <span className="text-slate-350 font-semibold font-sans">|</span>
+                                <span className="text-rose-500" title="Total Wrong/Incorrect">W:{testRes.wrong ?? testRes.incorrect ?? 0}</span>
+                                <span className="text-slate-350 font-semibold font-sans">|</span>
+                                <span className="text-slate-500" title="Total Unattempted">U:{testRes.blank ?? testRes.unattempted ?? 0}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[7.5px] font-extrabold font-mono text-slate-500 leading-none">
+                                C:{testRes.correct ?? 0} W:{testRes.wrong ?? testRes.incorrect ?? 0}
+                              </div>
+                            )}
+                            {!isPrintView ? (
+                              <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
+                                {(() => {
+                                  const bucket = determineRankBucket(Number(scoreVal), Number(maxScoreVal), testObj?.pattern || testRes.testPattern);
+                                  return bucket && bucket !== '—' && (
+                                    <div className="text-[8px] font-black text-rose-700 bg-rose-50 border border-rose-100 rounded px-1.5 py-0.5 uppercase tracking-wide font-sans inline-block">
+                                      {bucket}
+                                    </div>
+                                  );
+                                })()}
+                                {isCurrentTest && onPrintResult && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onPrintResult(testRes);
+                                    }}
+                                    className="mt-1 py-0.5 px-2 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans print:hidden"
+                                  >
+                                    <FileText size={10} strokeWidth={2.5} className="text-red-500" />
+                                    <span className="text-[8.5px] font-black uppercase text-red-600 tracking-tight">PDF</span>
+                                  </button>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      </td>
+
+                      <td className={cn(
+                        "text-center align-middle font-black font-sans transition-colors",
+                        isPrintView ? "p-1 text-[10.5px] border-r-[2.5px] border-r-amber-700/70" : "p-3 text-xs border-r-[3.5px] border-r-amber-700/70",
+                        testRes.isAbsent ? "text-slate-305 bg-slate-50/40" :
+                        testRes.rank === 1 ? "bg-amber-100/70 text-amber-800" :
+                        testRes.rank === 2 ? "bg-slate-100 text-slate-600" :
+                        testRes.rank === 3 ? "bg-orange-100/70 text-orange-850" :
+                        "bg-slate-50/30 text-slate-600"
+                      )}>
+                        {testRes.isAbsent ? '—' : rankVal}
+                      </td>
+                    </React.Fragment>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    );
   };
 
   const selectedProgObj = metaPrograms.find((p: any) => p.id === selectedProgramId);
@@ -7786,7 +8169,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
             @media print {
               @page {
                 size: landscape !important;
-                margin: 8mm 6mm !important;
+                margin: 5mm 5mm !important;
               }
               
               body, html, #root {
@@ -7825,11 +8208,11 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
               }
 
               .rounded-[2rem], .rounded-3xl, .rounded-[2.5rem] {
-                border-radius: 0.5rem !important;
+                border-radius: 0.15rem !important;
                 border: 1px solid #cbd5e1 !important;
               }
 
-              /* Strip left student column and header stickiness to avoid clipping or overlapping shifts on print pages */
+              /* Strip left student column and header stickiness on print pages */
               .print-comparison-matrix thead,
               .print-comparison-matrix tr,
               .print-comparison-matrix th,
@@ -7845,9 +8228,20 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 box-shadow: none !important;
               }
               
+              .print-page-container {
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                display: block !important;
+              }
+              
               .print-comparison-matrix tr {
                 page-break-inside: avoid !important;
-                border-bottom: 2px solid #64748b !important;
+                border-bottom: 1px solid #cbd5e1 !important;
               }
 
               /* Explicit solid light gray grid borders for standard laser printing */
@@ -7855,21 +8249,24 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 width: 100% !important;
                 border-collapse: collapse !important;
                 page-break-inside: auto !important;
+                margin-bottom: 0 !important;
               }
 
               .print-comparison-matrix td,
               .print-comparison-matrix th {
                 border: 1px solid #cbd5e1 !important;
-                padding: 10px 8px !important;
+                padding: 2.5px 2px !important;
                 text-align: center !important;
                 vertical-align: middle !important;
-                font-size: 9.5px !important;
+                font-size: 7px !important;
+                line-height: 1.12 !important;
+                letter-spacing: -0.01em !important;
               }
 
               .print-comparison-matrix th {
                 background-color: #f1f5f9 !important;
                 color: #0f172a !important;
-                font-weight: 900 !important;
+                font-weight: 850 !important;
               }
 
               .print-comparison-matrix td {
@@ -7877,32 +8274,24 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 color: #1e293b !important;
               }
 
-              .print-comparison-matrix td:first-child {
+              .print-comparison-matrix td:first-child,
+              .print-comparison-matrix th:first-child {
                 text-align: left !important;
-                font-size: 10.5px !important;
-                font-weight: 800 !important;
+                font-size: 7.5px !important;
+                font-weight: 850 !important;
+                padding: 2.5px 4px !important;
+                min-width: 140px !important;
+                max-width: 140px !important;
+                overflow: hidden !important;
+                text-overflow: ellipsis !important;
+                white-space: nowrap !important;
+              }
+              
+              .print-table-squeeze {
+                margin-bottom: 0px !important;
               }
             }
           ` }} />
-
-          {/* Printable Brand Header for Comparison Grid Report */}
-          <div className="hidden print:flex items-center justify-between border-b pb-4 mb-4 border-slate-300">
-            <div className="space-y-1 text-left">
-              <h1 className="text-base font-black uppercase tracking-wider text-slate-800">
-                Consolidated Student Performance Tracking & Comparative Matrix
-              </h1>
-              <p className="text-[9px] font-bold text-slate-500 font-mono mt-1">
-                {selectedProgramId ? `PROGRAM: ${metaPrograms.find((p: any) => p.id === selectedProgramId)?.programName || 'Unknown'}` : 'All Academic Programs'}
-                {selectedBatchId && ` | BATCH: ${metaBatches.find((b: any) => b.id === selectedBatchId)?.batchCode || 'Unknown'}`}
-                {selectedCenterId && ` | CENTER: ${metaCenters.find((c: any) => c.id === selectedCenterId)?.centerName || 'Unknown'}`}
-              </p>
-            </div>
-            <div className="text-right space-y-0.5">
-              <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest leading-none">Official Report</p>
-              <p className="text-xs font-bold text-slate-800">{new Date().toLocaleDateString()}</p>
-              <p className="text-[8px] text-slate-500 font-mono">Consolidated {displayedTests.length} Tests</p>
-            </div>
-          </div>
 
           {/* Main Comparison Filtering Header */}
           <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] border border-slate-800 shadow-xl space-y-6 main-filters-header print:hidden">
@@ -8147,9 +8536,84 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           ) : (
             <div className="space-y-4">
               {/* Spreadsheet Grid container */}
-              <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden">
+              <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden print:hidden">
                 <div className="overflow-x-auto overflow-y-auto max-h-[750px] relative">
-                  <table className="w-full border-collapse text-xs text-left">
+                  {(() => {
+                    const startIndex = (compPage - 1) * compPageSize;
+                    const paginatedStudents = comparisonGridData.students.slice(startIndex, startIndex + compPageSize);
+                    return renderComparisonTable(paginatedStudents, false);
+                  })()}
+                </div>
+              </Card>
+
+              {/* Grid Pagination Tools */}
+              <div className="flex flex-col md:flex-row justify-between items-center p-4 bg-slate-50 rounded-[1.5rem] border border-slate-100 gap-4 print:hidden">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] text-slate-500 font-black uppercase tracking-wider font-mono">
+                    Rows per page:
+                  </span>
+                  <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs font-sans">
+                    {[25, 50, 100, 999999].map((size) => (
+                      <button
+                        key={size}
+                        type="button"
+                        onClick={() => {
+                          setCompPageSize(size);
+                          setCompPage(1);
+                        }}
+                        className={cn(
+                          "px-2.5 py-1 text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer rounded-md",
+                          (compPageSize === size || (size === 999999 && compPageSize >= 999999))
+                            ? "bg-slate-900 text-white shadow-xs" 
+                            : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+                        )}
+                      >
+                        {size === 999999 ? 'All' : size}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-[10.5px] text-slate-500 font-bold font-mono">
+                    Showing {Math.min(comparisonGridData.students.length, (compPage - 1) * compPageSize + 1)}-{Math.min(comparisonGridData.students.length, compPage * compPageSize)} of {comparisonGridData.students.length} students
+                  </span>
+                  
+                  {compPageSize < 999999 && comparisonGridData.students.length > compPageSize && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        type="button"
+                        size="sm"
+                        disabled={compPage === 1}
+                        onClick={() => setCompPage(p => Math.max(1, p - 1))}
+                        className="h-8 w-8 p-0 rounded-lg flex items-center justify-center cursor-pointer font-extrabold"
+                      >
+                        &larr;
+                      </Button>
+                      <span className="text-xs font-black text-slate-800 px-2 font-mono">
+                        Page {compPage} / {Math.ceil(comparisonGridData.students.length / compPageSize)}
+                      </span>
+                      <Button
+                        variant="outline"
+                        type="button"
+                        size="sm"
+                        disabled={compPage >= Math.ceil(comparisonGridData.students.length / compPageSize)}
+                        onClick={() => setCompPage(p => Math.min(Math.ceil(comparisonGridData.students.length / compPageSize), p + 1))}
+                        className="h-8 w-8 p-0 rounded-lg flex items-center justify-center cursor-pointer font-extrabold"
+                      >
+                        &rarr;
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Keep print table hidden on screen, select print-optimized pages instead */}
+              <div className="hidden" style={{ display: 'none' }}>
+                <Card className="rounded-[2rem] border border-slate-200 shadow-xl bg-white overflow-hidden print:hidden">
+                  <div className="overflow-x-auto overflow-y-auto max-h-[750px] relative">
+                    <table className="w-full border-collapse text-xs text-left">
                     <thead className="sticky top-0 z-30 shadow-md">
                        {/* First Row Header Groups */}
                       <tr className="bg-[#0b1329] text-white border-b border-slate-800">
@@ -8534,6 +8998,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   </table>
                 </div>
               </Card>
+              </div> {/* Close hidden wrapper for old inactive table */}
 
               {/* Grid Pagination / Bottom Stats footnote */}
               <div className="flex flex-col md:flex-row justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-100 gap-3 print:hidden">
@@ -8543,6 +9008,270 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 <span className="text-[10px] text-slate-500 font-extrabold font-mono">
                   Showing {comparisonGridData.students.length} Student rows across {displayedTests.length} tests. Scroll horizontally to view the full progression track.
                 </span>
+              </div>
+
+              {/* PRINT-OPTIMIZED COMPACT PAGES (Exactly 25 students per page, minimum squeeze, no unneeded blank spaces) */}
+              <div className="hidden print:block space-y-0">
+                {(() => {
+                  const studentChunks: any[][] = [];
+                  const studentsList = comparisonGridData.students || [];
+                  for (let i = 0; i < studentsList.length; i += 25) {
+                    studentChunks.push(studentsList.slice(i, i + 25));
+                  }
+
+                  return studentChunks.map((chunk, chunkIdx) => {
+                    const isLastChunk = chunkIdx === studentChunks.length - 1;
+                    return (
+                      <div 
+                        key={chunkIdx} 
+                        className="print-page-container"
+                        style={{ 
+                          breakAfter: isLastChunk ? 'auto' : 'page', 
+                          pageBreakAfter: isLastChunk ? 'auto' : 'always',
+                          breakInside: 'avoid',
+                          pageBreakInside: 'avoid',
+                          display: 'block',
+                          margin: '0',
+                          padding: '0',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        {/* Elegant compact Header on top of EVERY SINGLE print page */}
+                        <div className="flex items-center justify-between border-b pb-1 mb-2 border-slate-350">
+                          <div className="space-y-0.5 text-left font-sans">
+                            <h1 className="text-[10px] font-black uppercase tracking-wider text-slate-800">
+                              Consolidated Performance Tracking Matrix
+                            </h1>
+                            <p className="text-[8px] font-bold text-slate-500 font-mono">
+                              {selectedProgramId ? `PROGRAM: ${metaPrograms.find((p: any) => p.id === selectedProgramId)?.programName || 'Unknown'}` : 'All Academic Programs'}
+                              {selectedBatchId && ` | BATCH: ${metaBatches.find((b: any) => b.id === selectedBatchId)?.batchCode || 'Unknown'}`}
+                              {selectedCenterId && ` | CENTER: ${metaCenters.find((c: any) => c.id === selectedCenterId)?.centerName || 'Unknown'}`}
+                            </p>
+                          </div>
+                          <div className="text-right space-y-0.5 font-sans">
+                            <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none">Official Record</p>
+                            <p className="text-[9px] font-bold text-slate-800">{new Date().toLocaleDateString()}</p>
+                            <p className="text-[7.5px] text-slate-500 font-mono">Page {chunkIdx + 1} of {studentChunks.length} • {displayedTests.length} Tests • 25 Rows/Page</p>
+                          </div>
+                        </div>
+
+                        {renderComparisonTable(chunk, true)}
+
+                        {/* Keep the old legacy table code fully deactivated and hidden */}
+                        <div className="hidden" style={{ display: 'none' }}>
+                          <table className="w-full border-collapse text-[7px] text-left border border-slate-300 print-table-squeeze mb-6">
+                          <thead>
+                            {/* First Row Header Groups */}
+                            <tr className="bg-[#0b1329] text-white border-b border-slate-800">
+                              <th rowSpan={2} className="px-2 py-1 border-r-[2.5px] border-r-amber-700/80 align-middle min-w-[140px] max-w-[140px] bg-[#0b1329] text-[8.5px] font-extrabold font-mono text-blue-400">
+                                Student Profile
+                              </th>
+                              {displayedTests.map((testMeta, idx) => {
+                                const testLabel = idx === 0 ? '🏆 LATEST TEST' : '📅 PREVIOUS TEST';
+                                return (
+                                  <th 
+                                    key={testMeta.testId} 
+                                    colSpan={isMedicalProgram ? 6 : 5} 
+                                    className={cn(
+                                      "px-1 py-0.5 text-center border-r-[2.5px] border-r-amber-700/80 font-extrabold tracking-tight uppercase text-[7.5px] font-mono",
+                                      idx === 0 ? "bg-[#0b1c3a] text-blue-200" : "bg-[#0f172a] text-slate-300"
+                                    )}
+                                  >
+                                    <span className="font-black text-[7.5px] tracking-tight">{testLabel}</span>
+                                    <span className="text-[7px] text-slate-300 font-bold block truncate max-w-[160px] mx-auto font-sans"> {testMeta.testName || '—'}</span>
+                                  </th>
+                                );
+                              })}
+                            </tr>
+
+                            {/* Second Row Header Sub-columns */}
+                            <tr className="bg-[#121b33] text-slate-200 border-b border-slate-755 font-bold uppercase tracking-wider text-[7px] font-mono">
+                              {displayedTests.map((testMeta) => (
+                                <React.Fragment key={testMeta.testId}>
+                                  <th className="p-0.5 text-center border-r border-slate-705 min-w-[45px] text-slate-300 bg-[#121b33]">Physics</th>
+                                  <th className="p-0.5 text-center border-r border-slate-705 min-w-[45px] text-slate-300 bg-[#121b33]">Chemistry</th>
+                                  {isMedicalProgram ? (
+                                    <>
+                                      <th className="p-0.5 text-center border-r border-slate-705 min-w-[45px] text-slate-300 bg-[#121b33]">Botany</th>
+                                      <th className="p-0.5 text-center border-r border-slate-705 min-w-[45px] text-slate-300 bg-[#121b33]">Zoology</th>
+                                    </>
+                                  ) : (
+                                    <th className="p-0.5 text-center border-r border-slate-705 min-w-[50px] text-slate-300 bg-[#121b33]">Math</th>
+                                  )}
+                                  <th className="p-0.5 text-center border-r border-slate-705 min-w-[60px] text-white bg-[#121b33]">Cumulative</th>
+                                  <th className="p-0.5 text-center border-r-[2.5px] border-r-amber-700/80 min-w-[30px] text-amber-400 bg-[#0d1427]">Rank</th>
+                                </React.Fragment>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {chunk.map((studentItem) => {
+                              return (
+                                <tr key={studentItem.regNo + '_' + studentItem.studentName} className="border-b border-slate-200">
+                                  {/* Student Details first column */}
+                                  <td className="px-2 py-1 border-r-[2.5px] border-r-amber-700/70 bg-white min-w-[140px] max-w-[140px] text-left">
+                                    <div className="font-extrabold text-slate-900 text-[8px] tracking-tight font-sans truncate">
+                                      {exportWithName ? studentItem.studentName : `STUDENT_${studentItem.regNo || 'ANON'}`}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                                      <span className="font-mono text-[6.5px] font-black text-slate-500 bg-slate-100 px-1 py-0.2 rounded border border-slate-200">
+                                        #{studentItem.regNo}
+                                      </span>
+                                      <span className="text-[6.5px] font-black text-indigo-600 bg-indigo-50 px-1 py-0.2 rounded border border-indigo-100 uppercase tracking-tight font-mono truncate max-w-[90px]" title={studentItem.batchCode || studentItem.batchName}>
+                                        {studentItem.batchCode || studentItem.batchName}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Chronological Test Columns */}
+                                  {displayedTests.map((testMeta, tIdx) => {
+                                    const testRes = studentItem.testResults[testMeta.testId];
+                                    
+                                    if (!testRes) {
+                                      return (
+                                        <React.Fragment key={testMeta.testId}>
+                                          <td className="p-1 text-center align-middle border-r border-slate-100 text-slate-300 font-mono">—</td>
+                                          <td className="p-1 text-center align-middle border-r border-slate-100 text-slate-300 font-mono">—</td>
+                                          {isMedicalProgram ? (
+                                            <>
+                                              <td className="p-1 text-center align-middle border-r border-slate-100 text-slate-300 font-mono">—</td>
+                                              <td className="p-1 text-center align-middle border-r border-slate-100 text-slate-300 font-mono">—</td>
+                                            </>
+                                          ) : (
+                                            <td className="p-1 text-center align-middle border-r border-slate-100 text-slate-300 font-mono">—</td>
+                                          )}
+                                          <td className="p-1 text-center align-middle border-r border-slate-100 bg-slate-50/10 text-slate-400 italic font-sans text-[7px]">Absent</td>
+                                          <td className="p-1 text-center align-middle border-r-[2.5px] border-r-amber-700/70 bg-slate-50/20 text-slate-300 font-mono">—</td>
+                                        </React.Fragment>
+                                      );
+                                    }
+
+                                    const phScore = getSubjectScore(testRes, 'Physics');
+                                    const chScore = getSubjectScore(testRes, 'Chemistry');
+                                    const botScore = getSubjectScore(testRes, 'Botany');
+                                    const zooScore = getSubjectScore(testRes, 'Zoology');
+                                    const mathScore = getSubjectScore(testRes, 'Math');
+
+                                    const scoreVal = testRes.isAbsent ? '—' : (testRes.score ?? '—');
+                                    const testObj = tests.find(t => t.id === testMeta.testId);
+                                    const maxScoreVal = testObj?.maxScore || testRes.maxScore || (testObj?.pattern === 'NEET' || isMedicalProgram ? 720 : 360);
+                                    const accuracyVal = testRes.isAbsent ? '—' : (testRes.accuracy != null ? `${Math.round(testRes.accuracy)}%` : '—');
+                                    const rankVal = testRes.rank ? `#${testRes.rank}` : '—';
+
+                                    return (
+                                      <React.Fragment key={testMeta.testId}>
+                                        {/* Physics */}
+                                        <td className="p-1 text-center align-middle border-r border-slate-200">
+                                          {testRes.isAbsent ? (
+                                            <span className="text-slate-300 font-mono">—</span>
+                                          ) : (
+                                            <div className="space-y-0.5 font-sans">
+                                              <div className="font-extrabold text-[#0f172a] text-[8px]">{phScore}</div>
+                                              <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                C:{getRawSubjectObj(testRes, 'Physics')?.correct ?? 0}/W:{getRawSubjectObj(testRes, 'Physics')?.wrong ?? getRawSubjectObj(testRes, 'Physics')?.incorrect ?? 0}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </td>
+
+                                        {/* Chemistry */}
+                                        <td className="p-1 text-center align-middle border-r border-slate-200">
+                                          {testRes.isAbsent ? (
+                                            <span className="text-slate-300 font-mono">—</span>
+                                          ) : (
+                                            <div className="space-y-0.5 font-sans">
+                                              <div className="font-extrabold text-[#0f172a] text-[8px]">{chScore}</div>
+                                              <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                C:{getRawSubjectObj(testRes, 'Chemistry')?.correct ?? 0}/W:{getRawSubjectObj(testRes, 'Chemistry')?.wrong ?? getRawSubjectObj(testRes, 'Chemistry')?.incorrect ?? 0}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </td>
+
+                                        {/* Botany & Zoology or Maths */}
+                                        {isMedicalProgram ? (
+                                          <>
+                                            {/* Botany Cell */}
+                                            <td className="p-1 text-center align-middle border-r border-slate-200">
+                                              {testRes.isAbsent ? (
+                                                <span className="text-slate-300 font-mono">—</span>
+                                              ) : (
+                                                <div className="space-y-0.5 font-sans">
+                                                  <div className="font-extrabold text-[#0f172a] text-[8px]">{botScore}</div>
+                                                  <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                    C:{getRawSubjectObj(testRes, 'Botany')?.correct ?? 0}/W:{getRawSubjectObj(testRes, 'Botany')?.wrong ?? getRawSubjectObj(testRes, 'Botany')?.incorrect ?? 0}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </td>
+
+                                            {/* Zoology Cell */}
+                                            <td className="p-1 text-center align-middle border-r border-slate-200">
+                                              {testRes.isAbsent ? (
+                                                <span className="text-slate-300 font-mono">—</span>
+                                              ) : (
+                                                <div className="space-y-0.5 font-sans">
+                                                  <div className="font-extrabold text-[#0f172a] text-[8px]">{zooScore}</div>
+                                                  <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                    C:{getRawSubjectObj(testRes, 'Zoology')?.correct ?? 0}/W:{getRawSubjectObj(testRes, 'Zoology')?.wrong ?? getRawSubjectObj(testRes, 'Zoology')?.incorrect ?? 0}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </td>
+                                          </>
+                                        ) : (
+                                          /* Math Cell */
+                                          <td className="p-1 text-center align-middle border-r border-slate-200">
+                                            {testRes.isAbsent ? (
+                                              <span className="text-slate-300 font-mono">—</span>
+                                            ) : (
+                                              <div className="space-y-0.5 font-sans">
+                                                <div className="font-extrabold text-[#0f172a] text-[8px]">{mathScore}</div>
+                                                <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                  C:{getRawSubjectObj(testRes, 'Math')?.correct ?? 0}/W:{getRawSubjectObj(testRes, 'Math')?.wrong ?? getRawSubjectObj(testRes, 'Math')?.incorrect ?? 0}
+                                                </div>
+                                              </div>
+                                            )}
+                                          </td>
+                                        )}
+
+                                        {/* Cumulative Score */}
+                                        <td className="p-1 text-center align-middle border-r border-slate-200 bg-blue-50/5 min-w-[60px]">
+                                          {testRes.isAbsent ? (
+                                            <span className="text-slate-305 italic text-[7px] font-sans">Absent</span>
+                                          ) : (
+                                            <div className="space-y-0.5 font-sans">
+                                              <div className="leading-none">
+                                                <span className="text-[8.5px] font-extrabold text-slate-900">{scoreVal}</span>
+                                                <span className="text-[6.5px] text-slate-400">/{maxScoreVal}</span>
+                                              </div>
+                                              <div className="text-[7px] font-bold text-emerald-600 leading-none">
+                                                {accuracyVal}
+                                              </div>
+                                              <div className="text-[6px] font-bold font-mono text-slate-400 leading-none">
+                                                C:{testRes.correct ?? 0}/W:{testRes.wrong ?? testRes.incorrect ?? 0}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </td>
+                                        
+                                        {/* Rank */}
+                                        <td className="p-1 text-center align-middle border-r-[2.5px] border-r-amber-700/70 font-black font-sans text-[7.5px] bg-slate-50/10 text-slate-700">
+                                          {testRes.isAbsent ? '—' : rankVal}
+                                        </td>
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        </div> {/* End of legacy print hidden map wrapper */}
+                      </div>
+                    );
+                  });
+                })()}
               </div>
             </div>
           )}
