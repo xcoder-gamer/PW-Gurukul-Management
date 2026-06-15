@@ -739,7 +739,7 @@ export default function Tests() {
                   <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="md:col-span-2 space-y-2 px-1">
                     <label className="text-xs font-black text-slate-400 uppercase tracking-widest px-1 block">Select Advanced Papers (Max 2)</label>
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                      {['2020', '2021', '2022', '2023', '2024', '2025'].flatMap(year => [`${year}-P1`, `${year}-P2`]).map(paper => (
+                      {['2020', '2021', '2022', '2023', '2024', '2025', '2026'].flatMap(year => [`${year}-P1`, `${year}-P2`]).map(paper => (
                         <button
                           key={paper}
                           type="button"
@@ -754,7 +754,7 @@ export default function Tests() {
                               : [...formData.advancedPapers, paper];
                             
                             let newQCount = formData.totalQuestions;
-                            if (newPapers.some(p => p.startsWith('2025'))) {
+                            if (newPapers.some(p => p.startsWith('2025') || p.startsWith('2026'))) {
                               newQCount = 48;
                             }
 
