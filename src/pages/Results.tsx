@@ -2794,11 +2794,12 @@ export default function Results() {
       const batchCode = res.batchCode || '—';
       const centerName = res.centerName || '—';
 
-      // student profile cells combining location, name and enrollment roll IDs in 2 compact lines
+      // student profile cells combining location, name and enrollment roll IDs in 2-3 compact lines
       const profileCell = [
         studentName,
-        `#${rollNo}  •  ${batchCode}  •  ${centerName.toUpperCase()}${res.type ? ` (${res.type})` : ''}`
-      ].join('\n');
+        `#${rollNo}  •  ${batchCode}  •  ${centerName.toUpperCase()}${res.type ? ` (${res.type})` : ''}`,
+        res.rankTarget ? `Target: ${res.rankTarget}${res.targetYear ? ` (${res.targetYear})` : ''}` : ''
+      ].filter(Boolean).join('\n');
 
       if (res.isAbsent) {
         return [
@@ -2819,11 +2820,13 @@ export default function Results() {
         return `${score}\nC:${correct} | W:${wrong} | U:${blank}`;
       });
 
-      // cumulative cell presenting overall score, accuracy and dynamic target tags in 2 lines
+      // cumulative cell presenting overall score, accuracy and calculated rank in 3 lines
+      const calculatedRank = determineRankBucket(res.score, scoreMaxLimit, res.testPattern || res.pattern || '');
       const cumulativeCell = [
         `${res.score}/${scoreMaxLimit}  •  ${Math.round(res.accuracy || 0)}% Acc`,
-        `C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}${res.rankTarget ? `  •  ${res.rankTarget}` : ''}`
-      ].join('\n');
+        `C:${res.correct || 0} | W:${res.wrong || 0} | U:${res.blank || 0}`,
+        calculatedRank && calculatedRank !== '—' ? `${calculatedRank.toUpperCase()}` : ''
+      ].filter(Boolean).join('\n');
 
       // Rank cell
       const rankCell = `#${res.rank}`;
@@ -3189,6 +3192,8 @@ export default function Results() {
             setView('detail');
           }}
           hideHeader={true}
+          wizardProgramId={wizardProgramId}
+          wizardBatchId={wizardBatchId}
         />
       ) : (
         <>
@@ -3406,7 +3411,7 @@ export default function Results() {
                                 {(res.rankTarget || res.targetYear) && (
                                   <span className="text-[8.5px] font-black text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
                                     <span className="text-amber-500">🎯</span>
-                                    <span>UNDER {res.rankTarget || '500'}</span>
+                                    <span>{String(res.rankTarget || '500').toLowerCase().startsWith('under') ? String(res.rankTarget || '500').toUpperCase() : `UNDER ${res.rankTarget || '500'}`}</span>
                                     {res.targetYear && <span className="text-slate-400 font-bold">({res.targetYear})</span>}
                                   </span>
                                 )}
@@ -4486,7 +4491,20 @@ export default function Results() {
   );
 }
 
-function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearch = '', onTestToggle, onSelectAllTests, onSelectResult, onPrintResult, hideHeader = true }: { 
+function GlobalAnalytics({ 
+  results, 
+  tests, 
+  onBack, 
+  selectedTestIds, 
+  initialSearch = '', 
+  onTestToggle, 
+  onSelectAllTests, 
+  onSelectResult, 
+  onPrintResult, 
+  hideHeader = true,
+  wizardProgramId = '',
+  wizardBatchId = ''
+}: { 
   results: any[], 
   tests: any[], 
   onBack: () => void,
@@ -4496,7 +4514,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   onSelectAllTests?: (ids: string[]) => void,
   onSelectResult?: (res: any) => void,
   onPrintResult?: (res: any) => void,
-  hideHeader?: boolean
+  hideHeader?: boolean,
+  wizardProgramId?: string,
+  wizardBatchId?: string
 }) {
   const { qbgMap, programs: metaPrograms, centers: metaCenters, batches: metaBatches } = useMetadata();
   const { role, centerId, batchIds } = useAuth();
@@ -4527,18 +4547,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [selectedTestModes, setSelectedTestModes] = useState<string[]>([]);
   const [studentSearch, setStudentSearch] = useState(initialSearch);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]); // Array of sKeys (regNo_name)
-  const [selectedProgramId, setSelectedProgramId] = useState<string>(() => {
-    if (selectedTestIds && selectedTestIds.length > 0 && tests && tests.length > 0) {
-      const sampleTest = tests.find(t => t.id === selectedTestIds[0]);
-      if (sampleTest?.programId) return sampleTest.programId;
-    }
-    if (metaPrograms && metaPrograms.length > 0) {
-      return metaPrograms[0].id;
-    }
-    return '';
-  });
+  const [selectedProgramId, setSelectedProgramId] = useState<string>(wizardProgramId || '');
   const [selectedCenterId, setSelectedCenterId] = useState<string>('');
-  const [selectedBatchId, setSelectedBatchId] = useState<string>('');
+  const [selectedBatchId, setSelectedBatchId] = useState<string>(wizardBatchId || '');
 
   useEffect(() => {
     if ((role === 'center' || role === 'center_level') && centerId && centerId !== 'all') {
@@ -4579,13 +4590,16 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
   const [expandedStudentSubject, setExpandedStudentSubject] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (selectedTestIds && selectedTestIds.length > 0 && tests && tests.length > 0) {
-      const sampleTest = tests.find(t => t.id === selectedTestIds[0]);
-      if (sampleTest?.programId) {
-        setSelectedProgramId(sampleTest.programId);
-      }
+    if (wizardProgramId) {
+      setSelectedProgramId(wizardProgramId);
     }
-  }, [selectedTestIds, tests]);
+  }, [wizardProgramId]);
+
+  useEffect(() => {
+    if (wizardBatchId) {
+      setSelectedBatchId(wizardBatchId);
+    }
+  }, [wizardBatchId]);
 
   const aggregateStats = useMemo(() => {
     if (results.length === 0) return null;
@@ -4611,12 +4625,22 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       }
 
       // Apply Center Filter
-      if (selectedCenterId && res.centerId !== selectedCenterId) return;
+      if (selectedCenterId) {
+        const resCenter = findCenterSafely(res.centerId, metaCenters);
+        const selCenter = findCenterSafely(selectedCenterId, metaCenters);
+        if (resCenter?.id !== selCenter?.id && res.centerId !== selectedCenterId) return;
+      }
 
       // Apply Batch Filter
-      if (selectedBatchId && res.batchId !== selectedBatchId) return;
+      if (selectedBatchId) {
+        const resBatch = findBatchSafely(res.batchId, metaBatches);
+        const selBatch = findBatchSafely(selectedBatchId, metaBatches);
+        if (resBatch?.id !== selBatch?.id && res.batchId !== selectedBatchId) return;
+      }
       
-      const sKey = `${res.regNo || 'NOREG'}_${res.studentName}`;
+      const sKey = (res.regNo && res.regNo !== '—' && res.regNo !== 'NOREG') 
+        ? String(res.regNo).trim().toUpperCase() 
+        : `${res.regNo || 'NOREG'}_${res.studentName}`;
       
       // Collect for "All Students" list (dropdown/suggestions) - regardless of mode or search
       if (!allStudentsMap[sKey]) {
@@ -5066,7 +5090,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       
     for (const r of sorted) {
       if (list.length >= 6) break;
-      const key = `${r.regNo}_${r.studentName}`;
+      const key = (r.regNo && r.regNo !== '—' && r.regNo !== 'NOREG') 
+        ? String(r.regNo).trim().toUpperCase() 
+        : `${r.regNo}_${r.studentName}`;
       if (!seen.has(key)) {
         seen.add(key);
         list.push({
@@ -5665,7 +5691,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
       const ranks: Record<string, number> = {};
       let currentRank = 1;
       sorted.forEach((res, idx) => {
-        const studentKey = `${res.regNo || '—'}_${res.studentName}`;
+        const studentKey = (res.regNo && res.regNo !== '—' && res.regNo !== 'NOREG') 
+          ? String(res.regNo).trim().toUpperCase() 
+          : `${res.regNo || '—'}_${res.studentName}`;
         if (res.isAbsent) {
           ranks[studentKey] = idx + 1;
           return;
@@ -5701,7 +5729,9 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
 
     resolvedResults.forEach(res => {
       const reg = res.regNo || '—';
-      const key = `${reg}_${res.studentName}`;
+      const key = (reg && reg !== '—' && reg !== 'NOREG') 
+        ? String(reg).trim().toUpperCase() 
+        : `${reg}_${res.studentName}`;
       if (!studentMap[key]) {
         studentMap[key] = {
           studentName: res.studentName,
@@ -6296,7 +6326,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
           {studentsList.map((studentItem) => {
             return (
               <tr 
-                key={studentItem.regNo + '_' + studentItem.studentName} 
+                key={studentItem.sKey || (studentItem.regNo + '_' + studentItem.studentName)} 
                 className={cn(
                   "hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300",
                   isPrintView && "page-break-inside-avoid"
@@ -6321,6 +6351,30 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                   )}
                   {exportWithName && studentItem.centerName && (
                     <div className={cn("text-slate-400 font-extrabold uppercase mt-0.5 tracking-widest font-mono text-left leading-none", isPrintView ? "text-[7px]" : "text-[8px]")}>{studentItem.centerName}</div>
+                  )}
+                  {((exportWithName && studentItem.type) || studentItem.rankTarget) && (
+                    <div className="flex flex-wrap items-center gap-1 mt-1">
+                      {exportWithName && studentItem.type && (
+                        <span className={cn(
+                          "font-black text-violet-750 bg-violet-50 rounded border border-violet-100 uppercase tracking-widest font-mono",
+                          isPrintView ? "text-[6.5px] px-1 py-0" : "text-[8px] px-1.5 py-0.5"
+                        )}>
+                          {studentItem.type}
+                        </span>
+                      )}
+                      {studentItem.rankTarget && (
+                        <span className={cn(
+                          "font-black text-amber-755 bg-amber-50 rounded border border-amber-100 uppercase tracking-widest font-mono inline-flex items-center gap-0.5",
+                          isPrintView ? "text-[6.5px] px-1 py-0" : "text-[8px] px-1.5 py-0.5"
+                        )}>
+                          <Target size={isPrintView ? 7 : 9} className="text-amber-600 shrink-0" />
+                          <span>{studentItem.rankTarget}</span>
+                          {studentItem.targetYear && (
+                            <span className={cn("text-slate-400 font-mono font-medium shrink-0", isPrintView ? "text-[5.5px]" : "text-[7px]")}>({studentItem.targetYear})</span>
+                          )}
+                        </span>
+                      )}
+                    </div>
                   )}
                 </td>
 
@@ -6476,31 +6530,32 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                                 C:{testRes.correct ?? 0} W:{testRes.wrong ?? testRes.incorrect ?? 0}
                               </div>
                             )}
-                            {!isPrintView ? (
-                              <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
-                                {(() => {
-                                  const bucket = determineRankBucket(Number(scoreVal), Number(maxScoreVal), testObj?.pattern || testRes.testPattern);
-                                  return bucket && bucket !== '—' && (
-                                    <div className="text-[8px] font-black text-rose-700 bg-rose-50 border border-rose-100 rounded px-1.5 py-0.5 uppercase tracking-wide font-sans inline-block">
-                                      {bucket}
-                                    </div>
-                                  );
-                                })()}
-                                {isCurrentTest && onPrintResult && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      onPrintResult(testRes);
-                                    }}
-                                    className="mt-1 py-0.5 px-2 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans print:hidden"
-                                  >
-                                    <FileText size={10} strokeWidth={2.5} className="text-red-500" />
-                                    <span className="text-[8.5px] font-black uppercase text-red-600 tracking-tight">PDF</span>
-                                  </button>
-                                )}
-                              </div>
-                            ) : null}
+                            <div className="flex flex-wrap items-center justify-center gap-1 mt-1">
+                              {(() => {
+                                const bucket = determineRankBucket(Number(scoreVal), Number(maxScoreVal), testObj?.pattern || testRes.testPattern);
+                                return bucket && bucket !== '—' && (
+                                  <div className={cn(
+                                    "font-black text-rose-700 bg-rose-50 border border-rose-100 rounded uppercase tracking-wide font-sans inline-block",
+                                    isPrintView ? "text-[7.5px] px-1 py-0" : "text-[8px] px-1.5 py-0.5"
+                                  )}>
+                                    {bucket}
+                                  </div>
+                                );
+                              })()}
+                              {!isPrintView && isCurrentTest && onPrintResult && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onPrintResult(testRes);
+                                  }}
+                                  className="mt-1 py-0.5 px-2 text-red-650 bg-white hover:bg-red-50 border border-red-200 rounded-md transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm mx-auto font-sans print:hidden"
+                                >
+                                  <FileText size={10} strokeWidth={2.5} className="text-red-500" />
+                                  <span className="text-[8.5px] font-black uppercase text-red-600 tracking-tight">PDF</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
                         )}
                       </td>
@@ -7448,7 +7503,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                 {aggregateStats.studentTable.map((s: any) => {
                   const isExpanded = false; // Always collapsed to avoid clutter and encourage new window analysis
                   return (
-                    <React.Fragment key={`${s.regNo}_${s.studentName}`}>
+                    <React.Fragment key={s.sKey}>
                       <tr 
                         onClick={() => {
                           const url = `${window.location.origin}/results?studentRegNo=${s.regNo}`;
@@ -8746,7 +8801,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                     <tbody className="divide-y divide-slate-100">
                       {comparisonGridData.students.map((studentItem) => {
                         return (
-                          <tr key={studentItem.regNo + '_' + studentItem.studentName} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300">
+                          <tr key={(studentItem as any).sKey || (studentItem.regNo + '_' + studentItem.studentName)} className="hover:bg-slate-50/70 transition-all even:bg-slate-50/20 border-b-2 border-slate-300">
                              {/* Student Details sticky first column */}
                             <td className="px-4 py-2 border-r-[3.5px] border-r-amber-700/70 sticky left-0 bg-white z-10 shadow-[4px_0_10px_rgba(0,0,0,0.04)] hover:bg-slate-50">
                               <div className="font-extrabold text-slate-900 text-xs tracking-tight font-sans text-left">
@@ -9107,7 +9162,7 @@ function GlobalAnalytics({ results, tests, onBack, selectedTestIds, initialSearc
                           <tbody>
                             {chunk.map((studentItem) => {
                               return (
-                                <tr key={studentItem.regNo + '_' + studentItem.studentName} className="border-b border-slate-200">
+                                <tr key={studentItem.sKey || (studentItem.regNo + '_' + studentItem.studentName)} className="border-b border-slate-200">
                                   {/* Student Details first column */}
                                   <td className="px-2 py-1 border-r-[2.5px] border-r-amber-700/70 bg-white min-w-[140px] max-w-[140px] text-left">
                                     <div className="font-extrabold text-slate-900 text-[8px] tracking-tight font-sans truncate">
