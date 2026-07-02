@@ -74,6 +74,79 @@ import Papa from 'papaparse';
 import { toast } from 'sonner';
 import { addLog, LogAction, LogCategory } from '../lib/logs';
 
+const parseDateToTime = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0;
+  const clean = String(dateStr).trim();
+  if (!clean) return 0;
+
+  // Handle DD-MM-YYYY or DD/MM/YYYY or YYYY-MM-DD or YYYY/MM/DD
+  const sep = clean.includes('/') ? '/' : '-';
+  const parts = clean.split(sep);
+  if (parts.length === 3) {
+    const p0 = parts[0].trim();
+    const p1 = parts[1].trim();
+    const p2 = parts[2].trim();
+
+    if (p2.length === 4) {
+      // DD-MM-YYYY or DD-MM-YYYY
+      const day = parseInt(p0, 10);
+      const month = parseInt(p1, 10) - 1;
+      const year = parseInt(p2, 10);
+      if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+        return new Date(year, month, day).getTime();
+      }
+    } else if (p0.length === 4) {
+      // YYYY-MM-DD
+      const year = parseInt(p0, 10);
+      const month = parseInt(p1, 10) - 1;
+      const day = parseInt(p2, 10);
+      if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+        return new Date(year, month, day).getTime();
+      }
+    }
+  }
+
+  // Handle Month DD, YYYY or DD Month YYYY or other text formats
+  const parsed = Date.parse(clean);
+  if (!isNaN(parsed)) {
+    return parsed;
+  }
+
+  // Fallback: check if we can parse words like "7 June 2026"
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const lowerClean = clean.toLowerCase();
+  for (let i = 0; i < 12; i++) {
+    if (lowerClean.includes(months[i])) {
+      const words = lowerClean.replace(/,/g, '').split(/\s+/);
+      let day = 1;
+      let year = new Date().getFullYear();
+      words.forEach(w => {
+        const num = parseInt(w, 10);
+        if (!isNaN(num)) {
+          if (num > 31) {
+            year = num;
+          } else {
+            day = num;
+          }
+        }
+      });
+      return new Date(year, i, day).getTime();
+    }
+  }
+
+  return 0;
+};
+
+const compareDatesChronologically = (dateA: string | null | undefined, dateB: string | null | undefined, descending = false): number => {
+  const timeA = parseDateToTime(dateA);
+  const timeB = parseDateToTime(dateB);
+  if (timeA === timeB) return 0;
+  if (descending) {
+    return timeB - timeA;
+  }
+  return timeA - timeB;
+};
+
 // Utility to determine Rank Bucket based on percentage score and pattern
 const determineRankBucket = (score: number, maxScore: number, pattern: string): string => {
   if (!maxScore || maxScore <= 0 || score === undefined || score === null) return '—';
@@ -1301,7 +1374,7 @@ export default function Results() {
 
   const uniqueTestDatesVec = useMemo(() => {
     const dates = tests.map(t => t.date).filter(Boolean);
-    const uniqueDates = Array.from(new Set(dates)).sort((a, b) => b.localeCompare(a));
+    const uniqueDates = Array.from(new Set(dates)).sort((a, b) => compareDatesChronologically(a, b, true));
     return uniqueDates.map(d => {
       const testsOnDate = tests.filter(t => t.date === d);
       const programIds = Array.from(new Set(testsOnDate.map(t => t.programId).filter(Boolean)));
@@ -1319,13 +1392,20 @@ export default function Results() {
 
   const wizardFilteredTests = useMemo(() => {
     return tests.filter(t => {
-      const matchesProg = !wizardProgramId || t.programId === wizardProgramId;
+      let matchesProg = !wizardProgramId || t.programId === wizardProgramId;
+      if (!matchesProg && wizardProgramId) {
+        const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+        matchesProg = tBatches.some((bId: any) => {
+          const bDetail = findBatchSafely(bId, metaBatches);
+          return bDetail?.programId === wizardProgramId;
+        });
+      }
       const matchesBatch = !wizardBatchId || t.batchIds?.includes(wizardBatchId);
       const matchesSearch = !testSearchQuery || t.name?.toLowerCase().includes(testSearchQuery.toLowerCase()) || String(t.pattern || '').toLowerCase().includes(testSearchQuery.toLowerCase());
       const matchesDate = !wizardDate || t.date === wizardDate;
       return matchesProg && matchesBatch && matchesSearch && matchesDate;
     });
-  }, [wizardProgramId, wizardBatchId, testSearchQuery, wizardDate, tests]);
+  }, [wizardProgramId, wizardBatchId, testSearchQuery, wizardDate, tests, metaBatches]);
 
   const sortedResults = useMemo(() => {
     // Standardize results into map format for easiest UI consumption
@@ -2290,11 +2370,7 @@ export default function Results() {
     try {
       const snap = await getDocs(query(collection(db, 'tests'), limit(150)));
       const fetched = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      fetched.sort((a: any, b: any) => {
-        const dateA = a.date || '';
-        const dateB = b.date || '';
-        return dateB.localeCompare(dateA);
-      });
+      fetched.sort((a: any, b: any) => compareDatesChronologically(a.date, b.date, true));
       setTests(fetched);
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'tests');
@@ -2969,10 +3045,24 @@ export default function Results() {
                   if (selectedTestIds && selectedTestIds.length > 0) {
                     ids = [...selectedTestIds];
                   } else if (wizardProgramId) {
-                    ids = tests.filter(t => t.programId === wizardProgramId).map(t => t.id);
+                    ids = tests.filter(t => {
+                      if (t.programId === wizardProgramId) return true;
+                      const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                      return tBatches.some((bId: any) => {
+                        const bDetail = findBatchSafely(bId, metaBatches);
+                        return bDetail?.programId === wizardProgramId;
+                      });
+                    }).map(t => t.id);
                   } else if (metaPrograms && metaPrograms.length > 0) {
                     const firstProgId = metaPrograms[0].id;
-                    ids = tests.filter(t => t.programId === firstProgId).map(t => t.id);
+                    ids = tests.filter(t => {
+                      if (t.programId === firstProgId) return true;
+                      const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                      return tBatches.some((bId: any) => {
+                        const bDetail = findBatchSafely(bId, metaBatches);
+                        return bDetail?.programId === firstProgId;
+                      });
+                    }).map(t => t.id);
                   }
 
                   if (ids.length === 0) {
@@ -5226,7 +5316,7 @@ function GlobalAnalytics({
         avgAccuracy,
         attendance: t.attendance
       };
-    }).sort((a, b) => String(a.testDate).localeCompare(String(b.testDate)));
+    }).sort((a, b) => compareDatesChronologically(a.testDate, b.testDate));
   }, [results, selectedTestIds, selectedProgramId, selectedCenterId, selectedBatchId, selectedTestModes, filters.studentType, tests]);
 
   // Student Progress calculation
@@ -5243,7 +5333,7 @@ function GlobalAnalytics({
       const attempts = s.attempts || [];
       if (attempts.length === 0) return;
       
-      const sortedAttempts = [...attempts].sort((a: any, b: any) => String(a.testDate).localeCompare(String(b.testDate)));
+      const sortedAttempts = [...attempts].sort((a: any, b: any) => compareDatesChronologically(a.testDate, b.testDate));
       const count = sortedAttempts.length;
       if (count === 1) {
         singleTestCount++;
@@ -5325,7 +5415,7 @@ function GlobalAnalytics({
         
         // Sort history chronologically by testDate (ascending)
         const sorted = historyDocs.sort((a, b) => {
-          const dateCompare = (a.testDate || '').localeCompare(b.testDate || '');
+          const dateCompare = compareDatesChronologically(a.testDate, b.testDate);
           if (dateCompare !== 0) return dateCompare;
           const aTime = a.createdAt?.seconds || 0;
           const bTime = b.createdAt?.seconds || 0;
@@ -5350,18 +5440,27 @@ function GlobalAnalytics({
         let applicableTests = [...tests];
 
         if (selectedProgramId) {
-          applicableTests = applicableTests.filter(t => t.programId === selectedProgramId);
+          applicableTests = applicableTests.filter(t => {
+            if (t.programId === selectedProgramId) return true;
+            const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+            return tBatches.some((bId: any) => {
+              const bDetail = findBatchSafely(bId, metaBatches);
+              return bDetail?.programId === selectedProgramId;
+            });
+          });
         }
         if (selectedBatchId) {
-          applicableTests = applicableTests.filter(t => t.batchIds?.includes(selectedBatchId) || t.batchId === selectedBatchId);
+          applicableTests = applicableTests.filter(t => {
+            const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+            return tBatches.some((bId: any) => {
+              const bDetail = findBatchSafely(bId, metaBatches);
+              return bDetail?.id === selectedBatchId || bId === selectedBatchId;
+            });
+          });
         }
 
-        // Sort chronologically by date
-        applicableTests.sort((a, b) => {
-          const dateA = a.date || '';
-          const dateB = b.date || '';
-          return dateB.localeCompare(dateA);
-        });
+        // Sort chronologically by date (newest first)
+        applicableTests.sort((a, b) => compareDatesChronologically(a.date, b.date, true));
 
         // Resolve tests to query
         // We always scope comparison to the active selection or the most recent 30 tests matching our scope.
@@ -5567,7 +5666,14 @@ function GlobalAnalytics({
           if (selectedCenterId && r.centerId !== selectedCenterId) return false;
           if (selectedProgramId && r.programId !== selectedProgramId) {
             const testObj = tests.find(t => t.id === r.testId);
-            if (testObj?.programId !== selectedProgramId) return false;
+            if (testObj?.programId !== selectedProgramId) {
+              const tBatches = testObj?.batchIds || (testObj?.batchId ? [testObj.batchId] : []);
+              const matchesBatchProg = tBatches.some((bId: any) => {
+                const bDetail = findBatchSafely(bId, metaBatches);
+                return bDetail?.programId === selectedProgramId;
+              });
+              if (!matchesBatchProg) return false;
+            }
           }
           if (allowedCenters.length > 0 && !allowedCenters.includes(r.centerId)) return false;
           return true;
@@ -5639,10 +5745,24 @@ function GlobalAnalytics({
       };
     });
 
+    const isTestApplicableToProgram = (testId: string, programId: string) => {
+      if (!programId) return true;
+      const testObj = tests.find(t => t.id === testId);
+      if (!testObj) return false;
+      if (testObj.programId === programId) return true;
+      const tBatches = testObj.batchIds || (testObj.batchId ? [testObj.batchId] : []);
+      return tBatches.some((bId: any) => {
+        const bDetail = findBatchSafely(bId, metaBatches);
+        return bDetail?.programId === programId;
+      });
+    };
+
     // Find all tests belonging to the selected program to build columns
     let programResults = resolvedResults;
     if (selectedProgramId) {
-      programResults = resolvedResults.filter(r => r.programId === selectedProgramId);
+      programResults = resolvedResults.filter(r => 
+        r.programId === selectedProgramId || isTestApplicableToProgram(r.testId, selectedProgramId)
+      );
     }
 
     const uniqueTestsMap: Record<string, { testId: string, testName: string, testDate: string, timestamp: number }> = {};
@@ -5668,7 +5788,7 @@ function GlobalAnalytics({
 
     // Sort tests chronologically (newest to oldest)
     const chronTests = Object.values(uniqueTestsMap).sort((a, b) => {
-      const dateCompare = (b.testDate || '').localeCompare(a.testDate || '');
+      const dateCompare = compareDatesChronologically(a.testDate, b.testDate, true);
       if (dateCompare !== 0) return dateCompare;
       return b.timestamp - a.timestamp;
     });
@@ -5760,13 +5880,24 @@ function GlobalAnalytics({
     let filteredStudents = Object.values(studentMap);
 
     if (selectedProgramId) {
-      filteredStudents = filteredStudents.filter(s => s.programId === selectedProgramId);
+      filteredStudents = filteredStudents.filter(s => 
+        s.programId === selectedProgramId || 
+        Object.values(s.testResults).some((r: any) => 
+          r.programId === selectedProgramId || isTestApplicableToProgram(r.testId, selectedProgramId)
+        )
+      );
     }
     if (selectedCenterId) {
-      filteredStudents = filteredStudents.filter(s => s.centerId === selectedCenterId);
+      filteredStudents = filteredStudents.filter(s => 
+        s.centerId === selectedCenterId || 
+        Object.values(s.testResults).some((r: any) => r.centerId === selectedCenterId)
+      );
     }
     if (selectedBatchId) {
-      filteredStudents = filteredStudents.filter(s => s.batchId === selectedBatchId);
+      filteredStudents = filteredStudents.filter(s => 
+        s.batchId === selectedBatchId || 
+        Object.values(s.testResults).some((r: any) => r.batchId === selectedBatchId)
+      );
     }
     if (studentSearch) {
       const search = studentSearch.toLowerCase();
@@ -5801,7 +5932,7 @@ function GlobalAnalytics({
       chronTests,
       students: sortedStudents
     };
-  }, [allCompResults, selectedProgramId, selectedCenterId, selectedBatchId, studentSearch, tests, qbgMap]);
+  }, [allCompResults, selectedProgramId, selectedCenterId, selectedBatchId, studentSearch, tests, qbgMap, metaBatches]);
 
   const displayedTests = useMemo(() => {
     const testsList = comparisonGridData.chronTests;
@@ -6861,10 +6992,24 @@ function GlobalAnalytics({
                         if (onSelectAllTests) {
                           let filteredTests = tests;
                           if (newProgId) {
-                            filteredTests = tests.filter((t: any) => t.programId === newProgId);
+                            filteredTests = tests.filter((t: any) => {
+                              if (t.programId === newProgId) return true;
+                              const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                              return tBatches.some((bId: any) => {
+                                const bDetail = findBatchSafely(bId, metaBatches);
+                                return bDetail?.programId === newProgId;
+                              });
+                            });
                           } else if (metaPrograms && metaPrograms.length > 0) {
                             const firstId = metaPrograms[0].id;
-                            filteredTests = tests.filter((t: any) => t.programId === firstId);
+                            filteredTests = tests.filter((t: any) => {
+                              if (t.programId === firstId) return true;
+                              const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                              return tBatches.some((bId: any) => {
+                                const bDetail = findBatchSafely(bId, metaBatches);
+                                return bDetail?.programId === firstId;
+                              });
+                            });
                           }
                           onSelectAllTests(filteredTests.map((t: any) => t.id));
                         }
@@ -6917,10 +7062,24 @@ function GlobalAnalytics({
                           if (newBatchId) {
                             filteredTests = tests.filter((t: any) => t.batchIds?.includes(newBatchId));
                           } else if (selectedProgramId) {
-                            filteredTests = tests.filter((t: any) => t.programId === selectedProgramId);
+                            filteredTests = tests.filter((t: any) => {
+                              if (t.programId === selectedProgramId) return true;
+                              const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                              return tBatches.some((bId: any) => {
+                                const bDetail = findBatchSafely(bId, metaBatches);
+                                return bDetail?.programId === selectedProgramId;
+                              });
+                            });
                           } else if (metaPrograms && metaPrograms.length > 0) {
                             const firstId = metaPrograms[0].id;
-                            filteredTests = tests.filter((t: any) => t.programId === firstId);
+                            filteredTests = tests.filter((t: any) => {
+                              if (t.programId === firstId) return true;
+                              const tBatches = t.batchIds || (t.batchId ? [t.batchId] : []);
+                              return tBatches.some((bId: any) => {
+                                const bDetail = findBatchSafely(bId, metaBatches);
+                                return bDetail?.programId === firstId;
+                              });
+                            });
                           }
                           onSelectAllTests(filteredTests.map((t: any) => t.id));
                         }
@@ -10008,7 +10167,7 @@ function ResultDetail({ result, onBack, onUpdate, autoPrint, tests = [], setSele
           const testB = tests.find((t: any) => t.id === b.testId);
           const dateA = testA?.date || a.testDate || a.date || '';
           const dateB = testB?.date || b.testDate || b.date || '';
-          return dateB.localeCompare(dateA);
+          return compareDatesChronologically(dateA, dateB, true);
         });
         setAllAttempts(attemptsWithRanks);
       } catch (err) {

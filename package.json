@@ -35,11 +35,9 @@
     "vite": "latest",
     "xlsx": "^0.18.5"
   },
-  "overrides": {
-    "node-domexception": "file:./node-domexception-shim.cjs"
-  },
   "devDependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "@google-cloud/firestore": "^8.6.0",
     "@types/express": "latest",
     "@types/node": "latest",
     "@types/papaparse": "^5.5.2",
@@ -47,6 +45,8 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "latest",
     "esbuild": "^0.28.0",
+    "firebase-admin": "^14.1.0",
+    "node-domexception": "^2.0.2",
     "tailwindcss": "latest",
     "tsx": "^4.21.0",
     "typescript": "latest",
